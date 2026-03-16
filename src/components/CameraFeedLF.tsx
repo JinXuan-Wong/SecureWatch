@@ -5,6 +5,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import type { Camera } from "../App";
+import { LOSTFOUND_API_BASE } from "../api/base";
 
 interface CameraFeedProps {
   camera: Camera;
@@ -18,15 +19,13 @@ interface CameraFeedProps {
   cycleSeconds?: number;
 }
 
-function toSameOrigin(url?: string) {
-  if (!url) return url;
-  try {
-    const u = new URL(url);
-    return u.pathname + u.search;
-  } catch {
-    return url;
-  }
+function resolveLfUrl(url?: string) {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${LOSTFOUND_API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
 }
+
+
 
 function withBust(url?: string, token?: number | string) {
   if (!url) return "";
@@ -222,8 +221,8 @@ export function CameraFeed({
     if (typeof onStatusChange === "function") onStatusChange(id, status);
   };
 
-  const mp4Src = toSameOrigin((activeCam as any).videoUrl || activeCam.videoUrl);
-  const mjpegRaw = toSameOrigin(
+  const mp4Src = resolveLfUrl((activeCam as any).videoUrl || activeCam.videoUrl);
+  const mjpegRaw = resolveLfUrl(
     (activeCam as any).mjpegUrl ||
       (camera as any).mjpegUrl ||
       (activeCam as any).mjpeg_url ||

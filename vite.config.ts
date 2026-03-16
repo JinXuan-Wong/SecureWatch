@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react-swc';
 import path from 'path';
 
 export default defineConfig({
-  base: '/SecureWatch/', // replace with your actual GitHub frontend repo name
+  base: '/SecureWatch/',
   plugins: [react()],
   resolve: {
     extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
@@ -70,6 +70,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/derived': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/offline': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
