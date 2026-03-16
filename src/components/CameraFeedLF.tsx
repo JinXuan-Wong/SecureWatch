@@ -44,9 +44,9 @@ function isLiveMjpegUrl(url?: string) {
 
 function overlayParam(url: string, overlay: 0 | 1) {
   try {
-    const u = new URL(url, window.location.origin);
+    const u = new URL(url);
     u.searchParams.set("overlay", String(overlay));
-    return u.pathname + u.search;
+    return u.toString();
   } catch {
     const hasOverlay = /([?&])overlay=\d/.test(url);
     if (hasOverlay) {
@@ -60,13 +60,13 @@ function overlayParam(url: string, overlay: 0 | 1) {
 function toDashboardMjpeg(url?: string) {
   if (!url) return "";
   try {
-    const u = new URL(url, window.location.origin);
+    const u = new URL(url);
     u.pathname = u.pathname.replace(
       "/api/live/mjpeg/",
       "/api/live/mjpeg_dashboard/"
     );
     u.searchParams.delete("overlay");
-    return u.pathname + u.search;
+    return u.toString();
   } catch {
     let out = url.replace(
       "/api/live/mjpeg/",
@@ -77,6 +77,7 @@ function toDashboardMjpeg(url?: string) {
     return out;
   }
 }
+
 
 function toNormalCleanMjpeg(url?: string) {
   if (!url) return "";
