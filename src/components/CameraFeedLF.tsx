@@ -113,6 +113,7 @@ function detectIsFisheye(cam: any): boolean {
     cam?.cameraType,
     cam?.camera_type,
     cam?.mode,
+    cam?.isFisheye ? "fisheye" : "",
   ];
 
   for (const v of candidates) {
@@ -305,11 +306,13 @@ export function CameraFeed({
 
     if (!mp4Src && !mjpegRaw) {
       setPlaybackState("offline");
+      setVideoFailed(true);
       reportStatus(camera.id, "offline");
       return;
     }
 
     setPlaybackState("loading");
+    setVideoFailed(false);
     reportStatus(camera.id, "warning");
 
     warnTimerRef.current = window.setTimeout(() => {
@@ -318,15 +321,20 @@ export function CameraFeed({
 
       if (!isRtspStream && !hasData && !videoFailed && !hasPlayedRef.current) {
         setPlaybackState("offline");
+        setVideoFailed(true);
         reportStatus(camera.id, "offline");
       }
-    }, 30000);
+    }, 15000);
 
     if (!isRtspStream && videoRef.current) {
       try {
         videoRef.current.load();
         videoRef.current.play().catch(() => {});
-      } catch {}
+      } catch {
+        setPlaybackState("offline");
+        setVideoFailed(true);
+        reportStatus(camera.id, "offline");
+      }
     }
 
     return () => {
@@ -336,7 +344,7 @@ export function CameraFeed({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mp4Src, mjpegRaw, pageIdx, camera.id, isRtspStream, videoFailed]);
+  }, [mp4Src, mjpegRaw, pageIdx, camera.id, activeCam.id, isRtspStream]);
 
   useEffect(() => {
     return () => {
@@ -367,7 +375,7 @@ export function CameraFeed({
       snapshotStartTimerRef.current = null;
     }
 
-    const refreshMs = 700;
+    const refreshMs = 1500;
     const offset = stableOffsetFromId(activeCam?.id ?? camera.id) * 60;
 
     snapshotStartTimerRef.current = window.setTimeout(() => {
@@ -390,8 +398,23 @@ export function CameraFeed({
     };
   }, [isRtspStream, useLiveMjpeg, activeCam?.id, camera.id]);
 
+  const isCardOffline =
+    videoFailed ||
+    playbackState === "error" ||
+    playbackState === "offline";
+
+  const isCardWarning =
+    !isCardOffline &&
+    (playbackState === "buffering" || playbackState === "loading");
+
+  const cardStatus: Camera["status"] = isCardOffline
+    ? "offline"
+    : isCardWarning
+    ? "warning"
+    : "online";
+
   const getStatusColor = () => {
-    switch (camera.status) {
+    switch (cardStatus) {
       case "online":
         return "text-green-400";
       case "warning":
@@ -404,7 +427,7 @@ export function CameraFeed({
   };
 
   const getStatusIcon = () => {
-    switch (camera.status) {
+    switch (cardStatus) {
       case "online":
         return <Circle className="w-3 h-3 fill-current" />;
       case "warning":
@@ -435,30 +458,15 @@ export function CameraFeed({
           isFullscreen ? "h-full" : gridContain ? "h-full" : "h-[150px]"
         }`}
       >
-        {camera.status === "offline" ? (
+        {isCardOffline ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
               <WifiOff className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-              <p className="text-slate-500 text-sm">No Signal</p>
+              <p className="text-slate-300 text-sm">OFFLINE</p>
             </div>
           </div>
         ) : isRtspStream ? (
-          videoFailed ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
-              <div className="text-center px-3">
-                <p className="text-slate-300 text-sm">Stream can’t load</p>
-                <a
-                  className="text-blue-400 text-xs underline"
-                  href={useLiveMjpeg ? mjpegSrc : snapshotSrc}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Open stream in new tab
-                </a>
-              </div>
-            </div>
-          ) : useLiveMjpeg ? (
+          useLiveMjpeg ? (
             <img
               className={mediaClass}
               src={mjpegSrc}
@@ -473,10 +481,9 @@ export function CameraFeed({
                   warnTimerRef.current = null;
                 }
               }}
-              onError={(e) => {
-                console.error("MJPEG ERROR:", activeCam.name, mjpegSrc, e);
+              onError={() => {
                 setVideoFailed(true);
-                setPlaybackState("error");
+                setPlaybackState("offline");
                 reportStatus(camera.id, "offline");
 
                 if (retryTimerRef.current) {
@@ -505,76 +512,61 @@ export function CameraFeed({
                   warnTimerRef.current = null;
                 }
               }}
-              onError={(e) => {
-                setPlaybackState("buffering");
-                reportStatus(camera.id, "warning");
-              }}
-            />
-          )
-        ) : mp4Src ? (
-          videoFailed ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
-              <div className="text-center px-3">
-                <p className="text-slate-300 text-sm">Video can’t play</p>
-                <a
-                  className="text-blue-400 text-xs underline"
-                  href={mp4Src}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Open video in new tab
-                </a>
-              </div>
-            </div>
-          ) : (
-            <video
-              ref={videoRef}
-              key={`${camera.id}-p${pageIdx}`}
-              src={mp4Src}
-              className={mediaClass}
-              autoPlay
-              loop
-              muted
-              playsInline
-              preload="auto"
-              controls={false}
-              onPlaying={() => {
-                hasPlayedRef.current = true;
-                setPlaybackState("playing");
-                setVideoFailed(false);
-                reportStatus(camera.id, "online");
-                if (warnTimerRef.current) {
-                  window.clearTimeout(warnTimerRef.current);
-                  warnTimerRef.current = null;
-                }
-              }}
-              onWaiting={() => {
-                setPlaybackState("buffering");
-                if (!videoFailed) reportStatus(camera.id, "warning");
-              }}
-              onStalled={() => {
-                setPlaybackState("buffering");
-                if (!videoFailed) reportStatus(camera.id, "warning");
-              }}
-              onPause={() => {
-                if (!videoFailed) setPlaybackState("paused");
-              }}
-              onError={(e) => {
-                console.error("VIDEO ERROR:", activeCam.name, mp4Src, e);
+              onError={() => {
                 setVideoFailed(true);
-                setPlaybackState("error");
+                setPlaybackState("offline");
                 reportStatus(camera.id, "offline");
               }}
             />
           )
+        ) : mp4Src ? (
+          <video
+            ref={videoRef}
+            key={`${camera.id}-p${pageIdx}`}
+            src={mp4Src}
+            className={mediaClass}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            controls={false}
+            onPlaying={() => {
+              hasPlayedRef.current = true;
+              setPlaybackState("playing");
+              setVideoFailed(false);
+              reportStatus(camera.id, "online");
+              if (warnTimerRef.current) {
+                window.clearTimeout(warnTimerRef.current);
+                warnTimerRef.current = null;
+              }
+            }}
+            onWaiting={() => {
+              setPlaybackState("buffering");
+              setVideoFailed(false);
+              reportStatus(camera.id, "warning");
+            }}
+            onStalled={() => {
+              setPlaybackState("buffering");
+              setVideoFailed(false);
+              reportStatus(camera.id, "warning");
+            }}
+            onPause={() => {
+              if (!videoFailed) setPlaybackState("paused");
+            }}
+            onError={() => {
+              setVideoFailed(true);
+              setPlaybackState("offline");
+              reportStatus(camera.id, "offline");
+            }}
+          />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-slate-500 text-sm">No Preview</p>
           </div>
         )}
 
-        {camera.recording && camera.status !== "offline" && (
+        {camera.recording && !isCardOffline && (
           <div className="absolute top-3 right-3 flex items-center gap-2 bg-red-500/90 backdrop-blur-sm px-2 py-1 rounded z-20">
             <Circle className="w-2 h-2 fill-current animate-pulse" />
             <span className="text-xs">REC</span>
@@ -582,10 +574,8 @@ export function CameraFeed({
         )}
 
         <div className="absolute top-3 right-[70px] bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs z-20">
-          {camera.status === "offline"
+          {isCardOffline
             ? "OFFLINE"
-            : videoFailed
-            ? "ERROR"
             : playbackState === "playing"
             ? useLiveMjpeg
               ? "LIVE"
@@ -614,6 +604,7 @@ export function CameraFeed({
               )}
               <p className="text-slate-300 text-sm mt-1">{camera.location}</p>
             </div>
+
             <div className={`flex items-center gap-1.5 ${getStatusColor()}`}>
               {getStatusIcon()}
             </div>

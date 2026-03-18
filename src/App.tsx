@@ -405,21 +405,39 @@ const [lostFoundOfflineStem, setLostFoundOfflineStem] = useState<string | null>(
           ? alertsJson.alerts
           : [];
 
-        setLfCameras(
-          cams.map((c: any) => ({
-            id: String(c.id ?? ""),
-            name: String(c.name ?? c.id ?? "Unknown Camera"),
-            location: String(c.location ?? ""),
-            status: (c.status ?? "offline") as "online" | "offline" | "warning",
-            recording: !!c.recording,
-            imageUrl: c.imageUrl ?? "",
-            videoUrl: c.videoUrl,
-            mjpegUrl: c.mjpegUrl,
-            views: c.views,
-            isFisheye: c.isFisheye,
-            videoType: c.videoType,
-          })) as any
-        );
+        setLfCameras((prev) => {
+          const prevMap = new Map(prev.map((cam) => [cam.id, cam]));
+
+          return cams.map((c: any) => {
+            const id = String(c.id ?? "");
+            const prevCam = prevMap.get(id);
+
+            const backendStatus = (c.status ?? "offline") as "online" | "offline" | "warning";
+            const localStatus = prevCam?.status;
+
+            // Keep stronger local failure states instead of letting poll reset them to online
+            const mergedStatus: "online" | "offline" | "warning" =
+              localStatus === "offline"
+                ? "offline"
+                : localStatus === "warning" && backendStatus === "online"
+                ? "warning"
+                : backendStatus;
+
+            return {
+              id,
+              name: String(c.name ?? c.id ?? "Unknown Camera"),
+              location: String(c.location ?? ""),
+              status: mergedStatus,
+              recording: !!c.recording,
+              imageUrl: c.imageUrl ?? "",
+              videoUrl: c.videoUrl,
+              mjpegUrl: c.mjpegUrl,
+              views: c.views,
+              isFisheye: c.isFisheye,
+              videoType: c.videoType,
+            };
+          }) as Camera[];
+        });
 
         setLfAlerts(
           backendAlerts.map((a: any) => ({
@@ -535,7 +553,7 @@ const [lostFoundOfflineStem, setLostFoundOfflineStem] = useState<string | null>(
  const handleDismissAlert = async (alertId: string) => {
   // optimistic UI remove first
   setAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
-  setLfAlerts((prev) => prev.filter((alert) => prev.filter((alert) => alert.id !== alertId)));
+  setLfAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
 
   try {
     const r = await fetch(
@@ -552,7 +570,7 @@ const [lostFoundOfflineStem, setLostFoundOfflineStem] = useState<string | null>(
   } catch (err) {
     console.error("Failed to dismiss lost & found alert:", err);
 
-    // optional: reload from backend if dismiss failed
+    // reload from backend if dismiss failed
     try {
       const alertsRes = await fetch(
         `${LOSTFOUND_API_BASE}/api/lostfound/alerts?limit=50`,
@@ -610,9 +628,16 @@ const [lostFoundOfflineStem, setLostFoundOfflineStem] = useState<string | null>(
   const totalSources =
     activeModule === "attire" ? attireTotalSources : lfCameras.length;
 
-  const online = activeSources; // active in live view
-  const warnings = activeModule === "attire" ? unreadAttireNotifs : lfAlerts.length;
-  const offline = Math.max(0, totalSources - online); // remaining not active
+  const lfOnlineCount = lfCameras.filter((c) => c.status === "online").length;
+  const lfWarningCount = lfCameras.filter((c) => c.status === "warning").length;
+  const lfOfflineCount = lfCameras.filter((c) => c.status === "offline").length;
+
+  const online = activeModule === "attire" ? activeSources : lfOnlineCount;
+  const warnings = activeModule === "attire" ? unreadAttireNotifs : lfWarningCount;
+  const offline =
+    activeModule === "attire"
+      ? Math.max(0, totalSources - activeSources)
+      : lfOfflineCount;
 
   const openLostFoundOfflineSettings = (stem: string) => {
     const cleanStem = String(stem || "").trim();

@@ -5,7 +5,7 @@ const API_BASE =
   (import.meta as any).env?.VITE_API_BASE_URL?.replace(/\/$/, "") ||
   "http://127.0.0.1:8000";
 
-const MAX_ACTIVE_LIVE_STREAMS = 5;
+const MAX_ACTIVE_LIVE_STREAMS = 4;
 
 type LiveDet = Record<string, any>;
 
