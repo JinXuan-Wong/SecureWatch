@@ -5,6 +5,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import type { Camera } from "../App";
+import { LOSTFOUND_API_BASE } from "../api/base";
 
 interface CameraFeedProps {
   camera: Camera;
@@ -18,14 +19,12 @@ interface CameraFeedProps {
   cycleSeconds?: number;
 }
 
-function toSameOrigin(url?: string) {
-  if (!url) return url;
-  try {
-    const u = new URL(url, window.location.origin);
-    return u.pathname + u.search;
-  } catch {
-    return url;
-  }
+function resolveMediaUrl(url?: string) {
+  if (!url) return "";
+
+  if (/^https?:\/\//i.test(url)) return url;
+
+  return `${LOSTFOUND_API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
 function withBust(url?: string, token?: number | string) {
@@ -45,9 +44,9 @@ function isLiveMjpegUrl(url?: string) {
 
 function overlayParam(url: string, overlay: 0 | 1) {
   try {
-    const u = new URL(url, window.location.origin);
+    const u = new URL(url);
     u.searchParams.set("overlay", String(overlay));
-    return u.pathname + u.search;
+    return u.toString();
   } catch {
     const hasOverlay = /([?&])overlay=\d/.test(url);
     if (hasOverlay) {
@@ -61,13 +60,13 @@ function overlayParam(url: string, overlay: 0 | 1) {
 function toDashboardMjpeg(url?: string) {
   if (!url) return "";
   try {
-    const u = new URL(url, window.location.origin);
+    const u = new URL(url);
     u.pathname = u.pathname.replace(
       "/api/live/mjpeg/",
       "/api/live/mjpeg_dashboard/"
     );
     u.searchParams.delete("overlay");
-    return u.pathname + u.search;
+    return u.toString();
   } catch {
     let out = url.replace(
       "/api/live/mjpeg/",
@@ -82,12 +81,12 @@ function toDashboardMjpeg(url?: string) {
 function toDashboardSnapshot(url?: string) {
   if (!url) return "";
   try {
-    const u = new URL(url, window.location.origin);
+    const u = new URL(url);
     u.pathname = u.pathname
       .replace("/api/live/mjpeg_dashboard/", "/api/live/dashboard_frame/")
       .replace("/api/live/mjpeg/", "/api/live/dashboard_frame/");
     u.searchParams.delete("overlay");
-    return u.pathname + u.search;
+    return u.toString();
   } catch {
     let out = url
       .replace("/api/live/mjpeg_dashboard/", "/api/live/dashboard_frame/")
@@ -263,8 +262,11 @@ export function CameraFeed({
     if (typeof onStatusChange === "function") onStatusChange(id, status);
   };
 
-  const mp4Src = toSameOrigin((activeCam as any).videoUrl || activeCam.videoUrl);
-  const mjpegRaw = toSameOrigin(
+  const mp4Src = resolveMediaUrl(
+    (activeCam as any).videoUrl || activeCam.videoUrl
+  );
+
+  const mjpegRaw = resolveMediaUrl(
     (activeCam as any).mjpegUrl ||
       (camera as any).mjpegUrl ||
       (activeCam as any).mjpeg_url ||
