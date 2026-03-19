@@ -24,7 +24,6 @@ export function resolveApiUrl(
 
   const base = getApiBase(mode);
 
-  // convert localhost backend URL to production backend URL
   if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(s)) {
     if (!base) return s;
     try {
@@ -35,12 +34,10 @@ export function resolveApiUrl(
     }
   }
 
-  // already absolute non-localhost URL
   if (/^https?:\/\//i.test(s)) {
     return s;
   }
 
-  // relative path
   if (!base) return s;
   return `${base}${s.startsWith("/") ? "" : "/"}${s}`;
 }

@@ -1,39 +1,84 @@
-import { ATTIRE_API_BASE } from "./base";
+import { LOSTFOUND_API_BASE } from "./base";
 
-const API_BASE = ATTIRE_API_BASE;
+const TOKEN_KEY = "securewatch_token";
 
 export function getToken() {
-  return localStorage.getItem("sw_token") || "";
+  try {
+    return localStorage.getItem(TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 
-export function setToken(t: string) {
-  if (t) localStorage.setItem("sw_token", t);
-  else localStorage.removeItem("sw_token");
+export function setToken(token: string) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // ignore
+  }
 }
 
-export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
+export function clearToken() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function buildUrl(path: string) {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (/^https?:\/\//i.test(cleanPath)) {
+    return cleanPath;
+  }
+
+  if (!LOSTFOUND_API_BASE) {
+    throw new Error("VITE_LOSTFOUND_API_BASE is not configured");
+  }
+
+  return `${LOSTFOUND_API_BASE}${cleanPath}`;
+}
+
+export async function api<T = any>(
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
   const token = getToken();
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(opts.headers as Record<string, string> || {}),
-  };
+  const headers = new Headers(init.headers || {});
+  if (!headers.has("Content-Type") && init.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
 
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...opts,
+  const res = await fetch(buildUrl(path), {
+    ...init,
     headers,
+    credentials: "include",
   });
 
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
+    let msg = `Request failed (${res.status})`;
     try {
-      const j = await res.json();
-      msg = j?.detail || msg;
-    } catch {}
-    throw new Error(msg);
+      const data = await res.json();
+      msg = data?.detail || data?.message || msg;
+    } catch {
+      try {
+        msg = await res.text();
+      } catch {
+        // ignore
+      }
+    }
+    throw new Error(msg || `Request failed (${res.status})`);
   }
 
-  return res.json();
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return res.json();
+  }
+
+  return (await res.text()) as T;
 }
