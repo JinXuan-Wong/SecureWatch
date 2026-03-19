@@ -105,6 +105,14 @@ function readStoredActiveCamIds(mode: "lost-found" | "attire"): string[] {
   }
 }
 
+function readStoredActiveCustomized(mode: "lost-found" | "attire"): boolean {
+  try {
+    return localStorage.getItem(`live_active_cam_customized_v1_${mode}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function toPctBox(det: LiveDet): { x: number; y: number; w: number; h: number } | null {
   if (
     typeof det?.x === "number" &&
@@ -842,20 +850,34 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
   const [fisheyeOverride, setFisheyeOverride] = useState<Record<string, ViewModeOverride>>({});
   const [activeCamIds, setActiveCamIds] = useState<string[]>([]);
   const [activeRestoreDone, setActiveRestoreDone] = useState(false);
+  const [activeCustomized, setActiveCustomized] = useState(false);
+
   const savingOverrideRef = useRef(false);
 
   useEffect(() => {
+    const customized = readStoredActiveCustomized(mode);
+    const stored = customized ? readStoredActiveCamIds(mode) : [];
+
+    setActiveCustomized(customized);
+    setActiveCamIds(stored);
+    setActiveRestoreDone(true);
+  }, [mode]);
+
+  useEffect(() => {
     if (!activeRestoreDone) return;
+    if (!activeCustomized) return;
 
     try {
       localStorage.setItem(
         `live_active_cam_ids_v1_${mode}`,
         JSON.stringify(activeCamIds.map((id) => normalizeCamId(id)))
       );
+      localStorage.setItem(`live_active_cam_customized_v1_${mode}`, "1");
     } catch {
       // ignore
     }
-  }, [activeCamIds, mode, activeRestoreDone]);
+  }, [activeCamIds, mode, activeRestoreDone, activeCustomized]);
+
   const loadViewModeOverrides = async () => {
     if (!API_BASE) return;
 
@@ -1151,15 +1173,17 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
 
       const filteredPrev = prev
         .map((id) => normalizeCamId(id))
-        .filter((id) => validLiveIds.includes(id));
+        .filter((id) => validLiveIds.includes(id))
+        .slice(0, MAX_ACTIVE_LIVE_STREAMS);
 
-      if (filteredPrev.length > 0) {
-        return filteredPrev.slice(0, MAX_ACTIVE_LIVE_STREAMS);
+      if (activeCustomized) {
+        if (filteredPrev.length > 0) return filteredPrev;
+        return validLiveIds.slice(0, MAX_ACTIVE_LIVE_STREAMS);
       }
 
       return validLiveIds.slice(0, MAX_ACTIVE_LIVE_STREAMS);
     });
-  }, [camsBase, activeRestoreDone]);
+  }, [camsBase, activeRestoreDone, activeCustomized]);
 
   const activeLiveSet = useMemo(
     () => new Set(activeCamIds.map((id) => normalizeCamId(id))),
@@ -1168,6 +1192,14 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
 
   const toggleActiveCamera = (camId: string) => {
     const key = normalizeCamId(camId);
+
+    setActiveCustomized(true);
+
+    try {
+      localStorage.setItem(`live_active_cam_customized_v1_${mode}`, "1");
+    } catch {
+      // ignore
+    }
 
     setActiveCamIds((prev) => {
       const normalizedPrev = prev.map((id) => normalizeCamId(id));
