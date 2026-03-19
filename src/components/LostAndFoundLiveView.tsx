@@ -318,11 +318,17 @@ function MjpegStream({
   const retryTimer = useRef<number | null>(null);
   const readyPollTimer = useRef<number | null>(null);
   const streamKey = useRef(`${camId}-${String(viewId ?? "")}-${Date.now()}`);
+  const onAspectRef = useRef(onAspect);
+  const hasFirstFrameRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [errCount, setErrCount] = useState(0);
   const [stopped, setStopped] = useState(false);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
+
+  useEffect(() => {
+    onAspectRef.current = onAspect;
+  }, [onAspect]);
 
   const makeUrl = (base: string, bump: number) => {
     const u = new URL(base, window.location.href);
@@ -354,6 +360,7 @@ function MjpegStream({
     setErrCount(0);
     setStopped(false);
     setHasFirstFrame(false);
+    hasFirstFrameRef.current = false;
 
     let lastRatio = 0;
 
@@ -362,7 +369,8 @@ function MjpegStream({
       const h = img.naturalHeight || 0;
 
       if (w > 0 && h > 0) {
-        if (!hasFirstFrame) {
+        if (!hasFirstFrameRef.current) {
+          hasFirstFrameRef.current = true;
           setHasFirstFrame(true);
           setLoading(false);
           setStopped(false);
@@ -371,7 +379,7 @@ function MjpegStream({
         const ratio = w / h;
         if (Math.abs(ratio - lastRatio) > 0.001) {
           lastRatio = ratio;
-          onAspect?.(ratio);
+          onAspectRef.current?.(ratio);
         }
         return true;
       }
@@ -419,6 +427,7 @@ function MjpegStream({
           const img2 = imgRef.current;
           if (!img2) return;
 
+          hasFirstFrameRef.current = false;
           setHasFirstFrame(false);
           setLoading(true);
 
@@ -457,7 +466,7 @@ function MjpegStream({
       img.src = "";
       img.removeAttribute("src");
     };
-  }, [url, detectionEnabled, showOverlays, camId, viewId, onAspect, hasFirstFrame]);
+  }, [url, detectionEnabled, showOverlays, camId, viewId]);
 
   return (
     <>
