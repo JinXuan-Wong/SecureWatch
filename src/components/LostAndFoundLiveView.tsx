@@ -5,8 +5,7 @@ import { getApiBase, resolveApiUrl } from "../api/base";
 const MAX_ACTIVE_LIVE_STREAMS = 4;
 const STATE_POLL_MS = 3000;
 const STATUS_POLL_MS = 6000;
-const SNAPSHOT_POLL_MS = 1500;
-const MAX_FRAME_RETRIES = 4;
+const MAX_STREAM_RETRIES = 5;
 
 type LiveDet = Record<string, any>;
 
@@ -137,11 +136,6 @@ function detColor(det: LiveDet) {
   if (c.includes("card")) return "border-pink-500 bg-pink-500/10 text-pink-100";
   if (c.includes("bottle")) return "border-sky-500 bg-sky-500/10 text-sky-100";
   return "border-sky-500 bg-sky-500/10 text-sky-100";
-}
-
-function withBust(url: string) {
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}t=${Date.now()}`;
 }
 
 function StatusStrip({
@@ -288,91 +282,176 @@ function PausedPreview({
   );
 }
 
-function PolledFrame({
+function StreamUnavailableOverlay({ message }: { message: string }) {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
+      <div className="text-center px-4">
+        <div className="text-slate-200 text-sm">{message}</div>
+        <div className="text-slate-500 text-xs mt-2">
+          Stream retry stopped temporarily
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MjpegStream({
   url,
-  label,
+  camId,
+  viewId,
+  detectionEnabled,
   onAspect,
+  showOverlays,
+  videoEnded,
+  onRestart,
 }: {
   url: string;
-  label?: string;
+  camId: string;
+  viewId?: string | number;
+  detectionEnabled: boolean;
   onAspect?: (ratio: number) => void;
+  showOverlays?: boolean;
+  videoEnded?: boolean;
+  onRestart?: () => void;
 }) {
-  const [src, setSrc] = useState("");
+  const imgRef = useRef<HTMLImageElement>(null);
+  const retryTimer = useRef<number | null>(null);
+  const streamKey = useRef(`${camId}-${String(viewId ?? "")}-${Date.now()}`);
+
   const [loading, setLoading] = useState(true);
   const [errCount, setErrCount] = useState(0);
   const [stopped, setStopped] = useState(false);
-  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  const makeUrl = (base: string, bump: number) => {
+    const u = new URL(base, window.location.href);
+    u.searchParams.set("t", String(Date.now()));
+    u.searchParams.set("r", String(bump || 0));
+    u.searchParams.set("key", streamKey.current);
+    u.searchParams.set("detection", detectionEnabled ? "1" : "0");
+
+    const overlays = showOverlays ?? detectionEnabled;
+    u.searchParams.set("overlays", overlays ? "1" : "0");
+
+    return u.toString();
+  };
 
   useEffect(() => {
-    if (!url) return;
+    const img = imgRef.current;
+    if (!img || !url) return;
 
-    let cancelled = false;
-    let timer: number | null = null;
+    if (retryTimer.current) {
+      window.clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    }
 
-    const loadOnce = () => {
-      if (cancelled || stopped) return;
-      setSrc(withBust(url));
-      setLoading(true);
+    setLoading(true);
+    setErrCount(0);
+    setStopped(false);
+
+    let lastRatio = 0;
+
+    const reportAspect = () => {
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      if (w > 0 && h > 0) {
+        const ratio = w / h;
+        if (Math.abs(ratio - lastRatio) > 0.001) {
+          lastRatio = ratio;
+          onAspect?.(ratio);
+        }
+      }
     };
 
-    loadOnce();
+    const onLoad = () => {
+      setLoading(false);
+      setErrCount(0);
+      setStopped(false);
+      reportAspect();
+    };
 
-    timer = window.setInterval(() => {
-      if (!cancelled && !stopped) {
-        loadOnce();
-      }
-    }, SNAPSHOT_POLL_MS);
+    const onError = () => {
+      setLoading(false);
+
+      setErrCount((prev) => {
+        const next = prev + 1;
+
+        if (next >= MAX_STREAM_RETRIES) {
+          setStopped(true);
+          return next;
+        }
+
+        const delay = Math.min(10000, 1500 + next * 1500);
+
+        retryTimer.current = window.setTimeout(() => {
+          const img2 = imgRef.current;
+          if (!img2) return;
+          img2.src = "";
+          img2.src = makeUrl(url, next);
+          setLoading(true);
+        }, delay);
+
+        return next;
+      });
+    };
+
+    img.addEventListener("load", onLoad);
+    img.addEventListener("error", onError);
+
+    img.src = "";
+    img.src = makeUrl(url, 0);
+
+    const aspectTimer = window.setInterval(reportAspect, 1000);
 
     return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
+      img.removeEventListener("load", onLoad);
+      img.removeEventListener("error", onError);
+      img.src = "";
+      img.removeAttribute("src");
+
+      if (retryTimer.current) {
+        window.clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+      }
+      window.clearInterval(aspectTimer);
     };
-  }, [url, stopped]);
+  }, [url, detectionEnabled, showOverlays, camId, viewId, onAspect]);
 
   return (
     <>
-      {loading && !stopped && (
+      {loading && !videoEnded && !stopped && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-10">
           <div className="text-xs text-slate-200 bg-slate-900/80 px-3 py-2 rounded-lg">
-            {errCount > 0 ? `Retrying... (${errCount})` : "Connecting..."}
+            {errCount > 0 ? `Reconnecting... (${errCount})` : "Connecting..."}
           </div>
         </div>
       )}
 
-      {stopped && (
+      {videoEnded && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
-          <div className="text-center px-4">
-            <div className="text-slate-200 text-sm">Frame unavailable</div>
-            <div className="text-slate-500 text-xs mt-2">{label || "Polling stopped temporarily"}</div>
+          <div className="text-center">
+            <div className="text-yellow-400 text-lg mb-3">⚠️ Video Ended</div>
+            {onRestart && (
+              <button
+                onClick={onRestart}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm transition-colors"
+              >
+                Restart Stream
+              </button>
+            )}
           </div>
         </div>
+      )}
+
+      {!videoEnded && stopped && (
+        <StreamUnavailableOverlay message="Stream unavailable" />
       )}
 
       <img
         ref={imgRef}
-        src={src}
-        alt={label || "live frame"}
         className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 ${
-          loading || stopped ? "opacity-0" : "opacity-100"
+          loading || videoEnded || stopped ? "opacity-0" : "opacity-100"
         }`}
-        onLoad={(e) => {
-          setLoading(false);
-          setErrCount(0);
-          const img = e.currentTarget;
-          const w = img.naturalWidth || 0;
-          const h = img.naturalHeight || 0;
-          if (w > 0 && h > 0) onAspect?.(w / h);
-        }}
-        onError={() => {
-          setLoading(false);
-          setErrCount((prev) => {
-            const next = prev + 1;
-            if (next >= MAX_FRAME_RETRIES) {
-              setStopped(true);
-            }
-            return next;
-          });
-        }}
+        alt={`${camId} view ${String(viewId ?? "")}`}
         draggable={false}
       />
     </>
@@ -390,7 +469,7 @@ function CameraCard({
   setAspect,
   toggleOverride,
   toggleActiveCamera,
-  getFrameUrls,
+  getStreamUrls,
   handleToggleDetection,
   handleRestartCamera,
 }: {
@@ -404,7 +483,7 @@ function CameraCard({
   setAspect: (key: string, ratio: number) => void;
   toggleOverride: (camId: string) => void;
   toggleActiveCamera: (camId: string) => void;
-  getFrameUrls: (camId: string, meta?: SettingsCamera) => {
+  getStreamUrls: (camId: string, meta?: SettingsCamera) => {
     normal: string;
     groupA: string;
     groupB: string;
@@ -424,7 +503,7 @@ function CameraCard({
     ? (((cam?.views || []).flatMap((v) => (v?.detections || v?.dets || []) as LiveDet[])) as LiveDet[])
     : [];
 
-  const frameUrls = getFrameUrls(camId, meta);
+  const streamUrls_ = getStreamUrls(camId, meta);
 
   const overrideState = fisheyeOverride[camId];
   const vt = String(meta?.videoType || "").toLowerCase();
@@ -518,10 +597,15 @@ function CameraCard({
             <div className="w-full relative bg-black rounded-lg" style={{ aspectRatio: String(ratio0) }}>
               {isActiveStream ? (
                 <>
-                  <PolledFrame
-                    url={frameUrls.normal}
-                    label={`${camId} normal`}
+                  <MjpegStream
+                    url={streamUrls_.normal}
+                    camId={camId}
+                    viewId={0}
+                    detectionEnabled={detectionEnabled}
+                    showOverlays={false}
                     onAspect={(r) => setAspect(key0, r)}
+                    videoEnded={videoEnded}
+                    onRestart={() => handleRestartCamera(camId)}
                   />
 
                   {detectionEnabled && (
@@ -581,10 +665,15 @@ function CameraCard({
 
               <div className="w-full relative bg-black rounded-lg" style={{ aspectRatio: String(ratioA) }}>
                 {isActiveStream ? (
-                  <PolledFrame
-                    url={frameUrls.groupA}
-                    label={`${camId} group A`}
+                  <MjpegStream
+                    url={streamUrls_.groupA}
+                    camId={camId}
+                    viewId={"A"}
+                    detectionEnabled={detectionEnabled}
+                    showOverlays={detectionEnabled}
                     onAspect={(r) => setAspect(keyA, r)}
+                    videoEnded={videoEnded}
+                    onRestart={() => handleRestartCamera(camId)}
                   />
                 ) : (
                   <PausedPreview
@@ -614,10 +703,15 @@ function CameraCard({
 
               <div className="w-full relative bg-black rounded-lg" style={{ aspectRatio: String(ratioB) }}>
                 {isActiveStream ? (
-                  <PolledFrame
-                    url={frameUrls.groupB}
-                    label={`${camId} group B`}
+                  <MjpegStream
+                    url={streamUrls_.groupB}
+                    camId={camId}
+                    viewId={"B"}
+                    detectionEnabled={detectionEnabled}
+                    showOverlays={detectionEnabled}
                     onAspect={(r) => setAspect(keyB, r)}
+                    videoEnded={videoEnded}
+                    onRestart={() => handleRestartCamera(camId)}
                   />
                 ) : (
                   <PausedPreview
@@ -928,23 +1022,27 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
     });
   };
 
-  const getFrameUrls = (camId: string, meta?: SettingsCamera) => {
+  const getStreamUrls = (camId: string, meta?: SettingsCamera) => {
     const views = (meta?.views || []) as SettingsView[];
 
     const findView = (key: string) =>
       views.find((v) => String(v?.id || "").endsWith(`__${key}`)) ||
       views.find((v) => String(v?.name || "").toLowerCase().includes(`group ${key.toLowerCase()}`));
 
-    const url0 = resolveApiUrl(mode, (views.find((v) => v?.order === 0)?.videoUrl || meta?.mjpegUrl) || "");
-    const urlA = resolveApiUrl(mode, findView("A")?.videoUrl);
-    const urlB = resolveApiUrl(mode, findView("B")?.videoUrl);
+    const v0 =
+      views.find((v) => String(v?.id || "").endsWith(`__0`)) ||
+      views.find((v) => v?.order === 0);
+
+    const url0 = resolveApiUrl(mode, v0?.mjpegUrl || meta?.mjpegUrl);
+    const urlA = resolveApiUrl(mode, findView("A")?.mjpegUrl);
+    const urlB = resolveApiUrl(mode, findView("B")?.mjpegUrl);
 
     const encodedId = encodeURIComponent(camId);
 
     return {
-      normal: url0 || `${API_BASE}/api/live/frame/${encodedId}/0`,
-      groupA: urlA || `${API_BASE}/api/live/group_frame/${encodedId}/A`,
-      groupB: urlB || `${API_BASE}/api/live/group_frame/${encodedId}/B`,
+      normal: url0 || `${API_BASE}/api/live/mjpeg/${encodedId}/0`,
+      groupA: urlA || `${API_BASE}/api/live/mjpeg/${encodedId}/A`,
+      groupB: urlB || `${API_BASE}/api/live/mjpeg/${encodedId}/B`,
     };
   };
 
@@ -1027,7 +1125,7 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
                   setAspect={setAspect}
                   toggleOverride={toggleOverride}
                   toggleActiveCamera={toggleActiveCamera}
-                  getFrameUrls={getFrameUrls}
+                  getStreamUrls={getStreamUrls}
                   handleToggleDetection={handleToggleDetection}
                   handleRestartCamera={handleRestartCamera}
                 />
@@ -1061,7 +1159,7 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
                   setAspect={setAspect}
                   toggleOverride={toggleOverride}
                   toggleActiveCamera={toggleActiveCamera}
-                  getFrameUrls={getFrameUrls}
+                  getStreamUrls={getStreamUrls}
                   handleToggleDetection={handleToggleDetection}
                   handleRestartCamera={handleRestartCamera}
                 />
