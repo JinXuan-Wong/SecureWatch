@@ -1,476 +1,581 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw, Download, FileDown, Image as ImageIcon } from "lucide-react";
 import {
-  RefreshCw,
-  AlertCircle,
-  CheckCircle2,
-  Clock3,
-  TrendingUp,
-  Wifi,
-  HardDrive,
-  Search,
-} from "lucide-react";
-import { LOSTFOUND_API_BASE } from "../api/base";
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  LineChart,
+  Line,
+} from "recharts";
+
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
+import { LOSTFOUND_API_BASE, buildApiUrl } from "../api/base";
+
+/* ================= TYPES ================= */
 
 type LostFoundItem = {
-  id?: string | number;
-  event_id?: string;
+  id: string;
   source?: string;
-  camera?: string;
-  camera_id?: string;
-  item_label?: string;
+  location?: string;
   label?: string;
-  class_name?: string;
   status?: string;
-  timestamp?: string;
-  created_at?: string;
-  event_time?: string;
+  firstSeenTs?: number;
+  lastSeenTs?: number;
+  imageUrl?: string | null;
 };
 
-function apiUrl(path?: string) {
-  if (!path) return "";
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${LOSTFOUND_API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+/* ================= UTILS ================= */
+
+function fmtTs(ts?: number) {
+  if (!ts) return "-";
+  const ms = ts > 2_000_000_000_000 ? ts : ts * 1000;
+  return new Date(ms).toLocaleString();
 }
 
-async function fetchLostFoundItems(): Promise<LostFoundItem[]> {
-  const res = await fetch(apiUrl("/api/lostfound/items"), {
-    headers: {
-      Accept: "application/json",
-    },
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Failed to fetch report data (${res.status}) ${text}`);
-  }
-
-  const data = await res.json();
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.items)) return data.items;
-  return [];
+function isLost(x: LostFoundItem) {
+  return (x.status || "").toLowerCase().includes("lost");
 }
 
-function getItemLabel(item: LostFoundItem) {
-  return item.item_label || item.label || item.class_name || "Unknown Item";
+function isSolved(x: LostFoundItem) {
+  return (x.status || "").toLowerCase().includes("solv");
 }
 
-function getTime(item: LostFoundItem) {
-  return item.timestamp || item.created_at || item.event_time || "";
+function NiceTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl bg-slate-950/95 ring-1 ring-white/15 px-3 py-2 shadow-xl">
+      <div className="text-xs text-slate-400">{label}</div>
+      {payload.map((p: any, idx: number) => (
+        <div key={idx} className="text-sm text-slate-100 font-medium">
+          {p.name}: {p.value}
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function formatDateTime(value?: string) {
-  if (!value) return "-";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
+function downloadBlob(filename: string, data: Blob) {
+  const url = URL.createObjectURL(data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
-function formatDay(value?: string) {
-  if (!value) return "Unknown";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "Unknown";
-  return d.toLocaleDateString();
+/* ================= UI SMALL COMPONENTS ================= */
+
+function StatCard({
+  title,
+  value,
+  tone,
+}: {
+  title: string;
+  value: React.ReactNode;
+  tone?: "red" | "green" | "neutral";
+}) {
+  const vCls =
+    tone === "red"
+      ? "text-red-400"
+      : tone === "green"
+      ? "text-emerald-400"
+      : "text-white";
+
+  return (
+    <div className="bg-white/5 ring-1 ring-white/10 rounded-2xl p-6">
+      <div className="text-slate-400 text-sm">{title}</div>
+      <div className={`text-2xl font-bold mt-2 ${vCls}`}>{value}</div>
+    </div>
+  );
 }
 
-export default function LostAndFoundReportsPage() {
+function ChartCard({
+  title,
+  height = 420,
+  children,
+}: {
+  title: string;
+  height?: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-white/5 ring-1 ring-white/10 rounded-2xl p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="font-semibold text-slate-100">{title}</div>
+        <div className="text-xs text-slate-400">Auto-generated</div>
+      </div>
+
+      <div
+        className="rounded-xl bg-black/20 ring-1 ring-white/10 p-3"
+        style={{ height }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ================= COMPONENT ================= */
+
+function LostAndFoundReportsPageInner() {
   const [items, setItems] = useState<LostFoundItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  async function loadReportData(showRefreshing = false) {
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "lost" | "solved">(
+    "all"
+  );
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+
+  const abortRef = useRef<AbortController | null>(null);
+
+  const reportRef = useRef<HTMLDivElement | null>(null);
+  const chartsRef = useRef<HTMLDivElement | null>(null);
+
+  async function load() {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    setLoading(true);
     try {
-      setError("");
-      if (showRefreshing) setRefreshing(true);
-      else setLoading(true);
+      const res = await fetch(
+        buildApiUrl(LOSTFOUND_API_BASE, "/api/lostfound/items"),
+        { signal: ac.signal }
+      );
+      if (!res.ok) throw new Error("Failed to load items");
+      const js = await res.json();
+      const arr: LostFoundItem[] = Array.isArray(js)
+        ? js
+        : Array.isArray(js?.items)
+        ? js.items
+        : [];
 
-      const rows = await fetchLostFoundItems();
-      setItems(rows);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load report data");
-      setItems([]);
+      const safe = arr
+        .filter(
+          (it) => it && typeof it === "object" && (it as any).id != null
+        )
+        .map((it: any) => ({
+          id: String(it.id),
+          source: it.source ? String(it.source) : "unknown",
+          location: it.location ? String(it.location) : "Unknown",
+          label: it.label ? String(it.label) : "Unknown",
+          status: it.status ? String(it.status) : "lost",
+          firstSeenTs:
+            typeof it.firstSeenTs === "number"
+              ? it.firstSeenTs
+              : typeof it.first_seen_ts === "number"
+              ? it.first_seen_ts
+              : typeof it.firstSeen === "number"
+              ? it.firstSeen
+              : undefined,
+          lastSeenTs:
+            typeof it.lastSeenTs === "number"
+              ? it.lastSeenTs
+              : typeof it.last_seen_ts === "number"
+              ? it.last_seen_ts
+              : typeof it.lastSeen === "number"
+              ? it.lastSeen
+              : undefined,
+          imageUrl: it.imageUrl
+            ? buildApiUrl(LOSTFOUND_API_BASE, String(it.imageUrl))
+            : it.image_url
+            ? buildApiUrl(LOSTFOUND_API_BASE, String(it.image_url))
+            : null,
+        }));
+
+      setItems(safe);
+    } catch (e) {
+      // ignore abort errors
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }
 
   useEffect(() => {
-    loadReportData(false);
+    load();
   }, []);
 
-  const filteredItems = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items;
+  const sources = useMemo(() => {
+    const s = new Set<string>();
+    items.forEach((it) => s.add((it.source || "unknown").toLowerCase()));
+    return ["all", ...Array.from(s).sort()];
+  }, [items]);
 
-    return items.filter((item) =>
-      [
-        getItemLabel(item),
-        item.status,
-        item.source,
-        item.camera,
-        item.camera_id,
-      ]
-        .filter(Boolean)
-        .join(" ")
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+
+    return items.filter((it) => {
+      if (statusFilter === "lost" && !isLost(it)) return false;
+      if (statusFilter === "solved" && !isSolved(it)) return false;
+
+      if (sourceFilter !== "all") {
+        const src = (it.source || "").toLowerCase();
+        if (src !== sourceFilter) return false;
+      }
+
+      if (!qq) return true;
+      const text = `${it.id} ${it.label} ${it.location} ${it.source} ${it.status}`
         .toLowerCase()
-        .includes(q)
-    );
-  }, [items, query]);
+        .trim();
+      return text.includes(qq);
+    });
+  }, [items, q, statusFilter, sourceFilter]);
 
   const summary = useMemo(() => {
-    const total = items.length;
-
-    const lost = items.filter(
-      (x) => String(x.status || "").toLowerCase() === "lost"
-    ).length;
-
-    const solved = items.filter(
-      (x) => String(x.status || "").toLowerCase() === "solved"
-    ).length;
-
-    const live = items.filter(
-      (x) => String(x.source || "").toLowerCase() === "live"
-    ).length;
-
-    const offline = items.filter((x) => {
-      const s = String(x.source || "").toLowerCase();
-      return s === "offline" || s === "upload";
-    }).length;
-
-    const solveRate = total > 0 ? ((solved / total) * 100).toFixed(1) : "0.0";
-
+    const lost = filtered.filter(isLost).length;
+    const solved = filtered.filter(isSolved).length;
     return {
-      total,
+      total: filtered.length,
       lost,
       solved,
-      live,
-      offline,
-      solveRate,
+      rate: filtered.length ? ((solved / filtered.length) * 100).toFixed(1) : "0.0",
     };
-  }, [items]);
+  }, [filtered]);
 
-  const byItem = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of items) {
-      const key = getItemLabel(item);
-      map.set(key, (map.get(key) || 0) + 1);
-    }
-    return [...map.entries()]
+  const itemDistribution = useMemo(() => {
+    const map: Record<string, number> = {};
+    filtered.forEach((i) => {
+      const key = i.label || "Unknown";
+      map[key] = (map[key] || 0) + 1;
+    });
+    return Object.entries(map)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 8);
-  }, [items]);
+      .slice(0, 10);
+  }, [filtered]);
 
-  const byDay = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of items) {
-      const key = formatDay(getTime(item));
-      map.set(key, (map.get(key) || 0) + 1);
-    }
-    return [...map.entries()]
+  const locationDistribution = useMemo(() => {
+    const map: Record<string, number> = {};
+    filtered.forEach((i) => {
+      const key = i.location || "Unknown";
+      map[key] = (map[key] || 0) + 1;
+    });
+    return Object.entries(map)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [filtered]);
+
+  const dailyTrend = useMemo(() => {
+    const map: Record<string, number> = {};
+    filtered.forEach((i) => {
+      if (!i.firstSeenTs) return;
+      const ms =
+        i.firstSeenTs > 2_000_000_000_000 ? i.firstSeenTs : i.firstSeenTs * 1000;
+      const d = new Date(ms).toLocaleDateString();
+      map[d] = (map[d] || 0) + 1;
+    });
+
+    return Object.entries(map)
       .map(([day, count]) => ({ day, count }))
-      .sort((a, b) => {
-        if (a.day === "Unknown") return 1;
-        if (b.day === "Unknown") return -1;
-        return new Date(b.day).getTime() - new Date(a.day).getTime();
-      })
-      .slice(0, 7);
-  }, [items]);
+      .sort((a, b) => new Date(a.day).getTime() - new Date(b.day).getTime());
+  }, [filtered]);
 
-  const recentItems = useMemo(() => {
-    return [...filteredItems]
-      .sort((a, b) => {
-        const ta = new Date(getTime(a)).getTime() || 0;
-        const tb = new Date(getTime(b)).getTime() || 0;
-        return tb - ta;
-      })
-      .slice(0, 20);
-  }, [filteredItems]);
+  function exportCSV() {
+    const headers = [
+      "ID",
+      "Label",
+      "Location",
+      "Source",
+      "Status",
+      "First Seen",
+      "Last Seen",
+      "Image URL",
+    ];
+
+    const rows = filtered.map((it) => [
+      it.id,
+      it.label || "",
+      it.location || "",
+      it.source || "",
+      isLost(it) ? "lost" : isSolved(it) ? "solved" : it.status || "",
+      fmtTs(it.firstSeenTs),
+      fmtTs(it.lastSeenTs),
+      it.imageUrl || "",
+    ]);
+
+    const csv = [
+      headers.join(","),
+      ...rows.map((r) =>
+        r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")
+      ),
+    ].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    downloadBlob("lost_found_report.csv", blob);
+  }
+
+  async function exportPNGCharts() {
+    if (!chartsRef.current) return;
+
+    const canvas = await html2canvas(chartsRef.current, {
+      scale: 2,
+      backgroundColor: "#0b1220",
+      useCORS: true,
+    });
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      downloadBlob("lost_found_charts.png", blob);
+    }, "image/png");
+  }
+
+  async function exportPDFReport() {
+    if (!reportRef.current) return;
+
+    const canvas = await html2canvas(reportRef.current, {
+      scale: 2,
+      backgroundColor: "#0b1220",
+      useCORS: true,
+      scrollY: -window.scrollY,
+    });
+
+    const imgData = canvas.toDataURL("image/png");
+    const pdf = new jsPDF("p", "mm", "a4");
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    if (imgHeight <= pageHeight) {
+      pdf.addImage(imgData, "PNG", 0, 0, imgWidth, imgHeight);
+    } else {
+      let remaining = imgHeight;
+      let position = 0;
+
+      while (remaining > 0) {
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        remaining -= pageHeight;
+        position -= pageHeight;
+
+        if (remaining > 0) pdf.addPage();
+      }
+    }
+
+    pdf.save("lost_found_report.pdf");
+  }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="w-full h-full bg-[#0b1220] text-slate-100">
+      <div ref={reportRef} className="w-full px-6 py-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-              Lost &amp; Found Reports
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Overview and analytics for Lost &amp; Found events.
-            </p>
+            <div className="text-2xl font-bold">Lost &amp; Found Analytical Report</div>
+            <div className="text-sm text-slate-400 mt-1">
+              Summary + charts + full list (exportable).
+            </div>
           </div>
 
-          <button
-            onClick={() => loadReportData(true)}
-            disabled={refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={load}
+              className="px-3 py-2 bg-white/10 hover:bg-white/15 rounded-xl flex items-center gap-2 ring-1 ring-white/10"
+              title="Refresh"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              Refresh
+            </button>
+
+            <button
+              onClick={exportCSV}
+              className="px-3 py-2 bg-sky-600/90 hover:bg-sky-600 rounded-xl flex items-center gap-2 ring-1 ring-sky-400/30"
+              title="Export CSV"
+            >
+              <Download size={16} />
+              Export CSV
+            </button>
+
+            <button
+              onClick={exportPNGCharts}
+              className="px-3 py-2 bg-white/10 hover:bg-white/15 rounded-xl flex items-center gap-2 ring-1 ring-white/10"
+              title="Export charts as PNG"
+            >
+              <ImageIcon size={16} />
+              Export Charts PNG
+            </button>
+
+            <button
+              onClick={exportPDFReport}
+              className="px-3 py-2 bg-emerald-600/80 hover:bg-emerald-600 rounded-xl flex items-center gap-2 ring-1 ring-emerald-400/30"
+              title="Export full report as PDF"
+            >
+              <FileDown size={16} />
+              Export PDF
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white/5 ring-1 ring-white/10 rounded-2xl p-4 mb-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search (item / location / id...)"
+              className="w-full px-3 py-2 rounded-xl bg-[#0f172a] ring-1 ring-white/10 outline-none text-sm"
             />
-            Refresh
-          </button>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="w-full px-3 py-2 rounded-xl bg-[#0f172a] ring-1 ring-white/10 outline-none text-sm"
+            >
+              <option value="all">All Status</option>
+              <option value="lost">Lost</option>
+              <option value="solved">Solved</option>
+            </select>
+
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-[#0f172a] ring-1 ring-white/10 outline-none text-sm"
+            >
+              {sources.map((s) => (
+                <option key={s} value={s}>
+                  {s === "all" ? "All Source" : s.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-3 text-xs text-slate-400">
+            Showing <span className="text-slate-200 font-semibold">{filtered.length}</span> items
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-medium text-slate-500">Total Events</div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">
-              {summary.total}
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
+          <StatCard title="Total Items" value={summary.total} />
+          <StatCard title="Lost" value={summary.lost} tone="red" />
+          <StatCard title="Solved" value={summary.solved} tone="green" />
+          <StatCard title="Solve Rate" value={`${summary.rate}%`} />
+        </div>
+
+        <div ref={chartsRef} className="grid grid-cols-1 xl:grid-cols-3 gap-10 mb-12">
+          <ChartCard title="Item Distribution" height={440}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={itemDistribution} margin={{ top: 10, right: 18, left: 0, bottom: 35 }}>
+                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="name"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 12 }}
+                  interval={0}
+                  angle={-10}
+                  dy={12}
+                />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                <Tooltip content={<NiceTooltip />} />
+                <Bar dataKey="count" name="Count" fill="#3b82f6" radius={[10, 10, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Location Distribution" height={440}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={locationDistribution}
+                margin={{ top: 10, right: 18, left: 0, bottom: 35 }}
+              >
+                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="name"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 12 }}
+                  interval={0}
+                  angle={-8}
+                  dy={12}
+                />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                <Tooltip content={<NiceTooltip />} />
+                <Bar dataKey="count" name="Count" fill="#10b981" radius={[10, 10, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Daily Trend" height={440}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={dailyTrend} margin={{ top: 10, right: 18, left: 0, bottom: 35 }}>
+                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+                <XAxis dataKey="day" stroke="#94a3b8" tick={{ fontSize: 12 }} dy={12} />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                <Tooltip content={<NiceTooltip />} />
+                <Line
+                  type="monotone"
+                  dataKey="count"
+                  name="Count"
+                  stroke="#f97316"
+                  strokeWidth={3}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+
+        <div className="bg-white/5 ring-1 ring-white/10 rounded-2xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[980px]">
+              <thead className="bg-white/10">
+                <tr>
+                  <th className="p-3 text-left">Image</th>
+                  <th className="p-3 text-left">Item</th>
+                  <th className="p-3 text-left">Location</th>
+                  <th className="p-3 text-left">Source</th>
+                  <th className="p-3 text-left">Status</th>
+                  <th className="p-3 text-left">First Seen</th>
+                  <th className="p-3 text-left">Last Seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((it) => (
+                  <tr key={it.id} className="border-t border-white/5 hover:bg-white/[0.03]">
+                    <td className="p-3">
+                      {it.imageUrl ? (
+                        <img
+                          src={it.imageUrl}
+                          className="w-16 h-12 object-cover rounded-lg ring-1 ring-white/10"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <span className="text-slate-500">-</span>
+                      )}
+                    </td>
+                    <td className="p-3 font-medium text-slate-100">{it.label}</td>
+                    <td className="p-3 text-slate-200">{it.location}</td>
+                    <td className="p-3 text-slate-300">{(it.source || "").toUpperCase()}</td>
+                    <td className="p-3">
+                      <span className={isLost(it) ? "text-red-400" : "text-emerald-400"}>
+                        {isLost(it) ? "lost" : "solved"}
+                      </span>
+                    </td>
+                    <td className="p-3 text-slate-300">{fmtTs(it.firstSeenTs)}</td>
+                    <td className="p-3 text-slate-300">{fmtTs(it.lastSeenTs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <div className="text-xs font-medium text-amber-700">Lost</div>
-            <div className="mt-2 text-2xl font-bold text-amber-800">
-              {summary.lost}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-            <div className="text-xs font-medium text-emerald-700">Solved</div>
-            <div className="mt-2 text-2xl font-bold text-emerald-800">
-              {summary.solved}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-            <div className="text-xs font-medium text-blue-700">Live Source</div>
-            <div className="mt-2 text-2xl font-bold text-blue-800">
-              {summary.live}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-purple-200 bg-purple-50 p-4">
-            <div className="text-xs font-medium text-purple-700">
-              Offline Source
-            </div>
-            <div className="mt-2 text-2xl font-bold text-purple-800">
-              {summary.offline}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
-            <div className="text-xs font-medium text-cyan-700">Solve Rate</div>
-            <div className="mt-2 text-2xl font-bold text-cyan-800">
-              {summary.solveRate}%
-            </div>
-          </div>
+          {filtered.length === 0 && (
+            <div className="p-8 text-center text-slate-400">No items found</div>
+          )}
         </div>
       </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="relative max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search reports table..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-slate-400"
-          />
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-400" />
-          <p className="mt-3 text-sm text-slate-500">Loading reports...</p>
-        </div>
-      ) : error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 shadow-sm">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 h-5 w-5 text-red-600" />
-            <div>
-              <h3 className="font-semibold text-red-700">
-                Failed to load report data
-              </h3>
-              <p className="mt-1 text-sm text-red-600">{error}</p>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-slate-700" />
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Top Detected Items
-                </h2>
-              </div>
-
-              <div className="space-y-3">
-                {byItem.length === 0 ? (
-                  <p className="text-sm text-slate-500">No item data available.</p>
-                ) : (
-                  byItem.map((row) => {
-                    const max = byItem[0]?.count || 1;
-                    const width = `${(row.count / max) * 100}%`;
-
-                    return (
-                      <div key={row.name}>
-                        <div className="mb-1 flex items-center justify-between text-sm">
-                          <span className="font-medium text-slate-700">
-                            {row.name}
-                          </span>
-                          <span className="text-slate-500">{row.count}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-100">
-                          <div
-                            className="h-2 rounded-full bg-slate-800"
-                            style={{ width }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center gap-2">
-                <Clock3 className="h-5 w-5 text-slate-700" />
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Events by Day
-                </h2>
-              </div>
-
-              <div className="space-y-3">
-                {byDay.length === 0 ? (
-                  <p className="text-sm text-slate-500">No date data available.</p>
-                ) : (
-                  byDay.map((row) => {
-                    const max = byDay[0]?.count || 1;
-                    const width = `${(row.count / max) * 100}%`;
-
-                    return (
-                      <div key={row.day}>
-                        <div className="mb-1 flex items-center justify-between text-sm">
-                          <span className="font-medium text-slate-700">
-                            {row.day}
-                          </span>
-                          <span className="text-slate-500">{row.count}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-100">
-                          <div
-                            className="h-2 rounded-full bg-cyan-600"
-                            style={{ width }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-3">
-            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
-              <div className="flex items-center gap-2 text-blue-700">
-                <Wifi className="h-5 w-5" />
-                <h3 className="font-semibold">Live Monitoring</h3>
-              </div>
-              <p className="mt-3 text-sm text-blue-700/90">
-                {summary.live} event(s) were detected from live camera streams.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-purple-200 bg-purple-50 p-5 shadow-sm">
-              <div className="flex items-center gap-2 text-purple-700">
-                <HardDrive className="h-5 w-5" />
-                <h3 className="font-semibold">Offline / Upload</h3>
-              </div>
-              <p className="mt-3 text-sm text-purple-700/90">
-                {summary.offline} event(s) were recorded from offline or uploaded
-                sources.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-              <div className="flex items-center gap-2 text-emerald-700">
-                <CheckCircle2 className="h-5 w-5" />
-                <h3 className="font-semibold">Resolution Progress</h3>
-              </div>
-              <p className="mt-3 text-sm text-emerald-700/90">
-                {summary.solved} out of {summary.total} event(s) are marked as
-                solved.
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              Recent Event Records
-            </h2>
-
-            {recentItems.length === 0 ? (
-              <p className="text-sm text-slate-500">No records found.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-left text-slate-500">
-                      <th className="py-3 pr-4 font-medium">Item</th>
-                      <th className="py-3 pr-4 font-medium">Status</th>
-                      <th className="py-3 pr-4 font-medium">Source</th>
-                      <th className="py-3 pr-4 font-medium">Camera</th>
-                      <th className="py-3 pr-4 font-medium">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentItems.map((item, index) => {
-                      const key = String(item.id ?? item.event_id ?? index);
-                      const status = String(item.status || "").toLowerCase();
-
-                      return (
-                        <tr
-                          key={key}
-                          className="border-b border-slate-100 last:border-0"
-                        >
-                          <td className="py-3 pr-4 font-medium text-slate-800">
-                            {getItemLabel(item)}
-                          </td>
-
-                          <td className="py-3 pr-4">
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                status === "solved"
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : status === "lost"
-                                  ? "bg-amber-50 text-amber-700"
-                                  : "bg-slate-50 text-slate-700"
-                              }`}
-                            >
-                              {item.status || "-"}
-                            </span>
-                          </td>
-
-                          <td className="py-3 pr-4 text-slate-700">
-                            {item.source || "-"}
-                          </td>
-
-                          <td className="py-3 pr-4 text-slate-700">
-                            {item.camera || item.camera_id || "-"}
-                          </td>
-
-                          <td className="py-3 pr-4 text-slate-700">
-                            {formatDateTime(getTime(item))}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </>
-      )}
     </div>
   );
 }
+
+export const LostAndFoundReportsPage = LostAndFoundReportsPageInner;
+export default LostAndFoundReportsPageInner;

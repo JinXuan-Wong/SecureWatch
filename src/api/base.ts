@@ -1,16 +1,46 @@
-const clean = (v?: string) => (v || "").trim().replace(/\/+$/, "");
+function normalizeBase(url?: string) {
+  return (url || "").trim().replace(/\/+$/, "");
+}
 
 const env = (import.meta as any).env || {};
+const isBrowser = typeof window !== "undefined";
 
-export const LOSTFOUND_API_BASE = clean(env.VITE_LOSTFOUND_API_BASE_URL);
-export const ATTIRE_API_BASE = clean(env.VITE_ATTIRE_API_BASE_URL);
-export const LEGACY_API_BASE = clean(env.VITE_API_BASE_URL);
+const isLocalhost =
+  isBrowser &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1");
+
+/**
+ * Base URLs (NO hardcoded production URLs)
+ * Priority:
+ * 1. module-specific env
+ * 2. legacy shared env
+ * 3. localhost fallback
+ */
+export const LEGACY_API_BASE = normalizeBase(env.VITE_API_BASE_URL);
+
+export const LOSTFOUND_API_BASE = normalizeBase(
+  env.VITE_LOSTFOUND_API_BASE_URL ||
+    env.VITE_LOSTFOUND_API_BASE ||
+    LEGACY_API_BASE ||
+    (isLocalhost ? "http://127.0.0.1:8000" : "")
+);
+
+export const ATTIRE_API_BASE = normalizeBase(
+  env.VITE_ATTIRE_API_BASE_URL ||
+    env.VITE_ATTIRE_API_BASE ||
+    LEGACY_API_BASE ||
+    (isLocalhost ? "http://127.0.0.1:8001" : "")
+);
 
 export function getApiBase(mode: "lost-found" | "attire") {
-  if (mode === "lost-found") {
-    return LOSTFOUND_API_BASE || LEGACY_API_BASE || "";
-  }
-  return ATTIRE_API_BASE || LEGACY_API_BASE || "";
+  return mode === "lost-found" ? LOSTFOUND_API_BASE : ATTIRE_API_BASE;
+}
+
+export function buildApiUrl(base: string, path: string) {
+  if (!path) return base;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${base}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
 export function resolveApiUrl(
@@ -24,7 +54,7 @@ export function resolveApiUrl(
 
   const base = getApiBase(mode);
 
-  // convert localhost backend URL to production backend URL
+  // convert localhost backend URL → env base
   if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(s)) {
     if (!base) return s;
     try {
@@ -35,7 +65,7 @@ export function resolveApiUrl(
     }
   }
 
-  // already absolute non-localhost URL
+  // already absolute URL
   if (/^https?:\/\//i.test(s)) {
     return s;
   }
