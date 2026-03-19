@@ -2,8 +2,8 @@ const clean = (v?: string) => (v || "").trim().replace(/\/+$/, "");
 
 const env = (import.meta as any).env || {};
 
-export const LOSTFOUND_API_BASE = clean(env.VITE_LOSTFOUND_API_BASE);
-export const ATTIRE_API_BASE = clean(env.VITE_ATTIRE_API_BASE);
+export const LOSTFOUND_API_BASE = clean(env.VITE_LOSTFOUND_API_BASE_URL);
+export const ATTIRE_API_BASE = clean(env.VITE_ATTIRE_API_BASE_URL);
 export const LEGACY_API_BASE = clean(env.VITE_API_BASE_URL);
 
 export function getApiBase(mode: "lost-found" | "attire") {
