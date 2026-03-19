@@ -14,7 +14,11 @@ import {
 
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import { LOSTFOUND_API_BASE, buildApiUrl } from "../api/base";
+import {
+  LOSTFOUND_API_BASE,
+  buildApiUrl,
+  resolveLostFoundUrl,
+} from "../api/base";
 
 /* ================= TYPES ================= */
 
@@ -152,10 +156,10 @@ function LostAndFoundReportsPageInner() {
       );
       if (!res.ok) throw new Error("Failed to load items");
       const js = await res.json();
-      const arr: LostFoundItem[] = Array.isArray(js)
-        ? js
-        : Array.isArray(js?.items)
+      const arr: LostFoundItem[] = Array.isArray(js?.items)
         ? js.items
+        : Array.isArray(js)
+        ? js
         : [];
 
       const safe = arr
@@ -173,22 +177,14 @@ function LostAndFoundReportsPageInner() {
               ? it.firstSeenTs
               : typeof it.first_seen_ts === "number"
               ? it.first_seen_ts
-              : typeof it.firstSeen === "number"
-              ? it.firstSeen
               : undefined,
           lastSeenTs:
             typeof it.lastSeenTs === "number"
               ? it.lastSeenTs
               : typeof it.last_seen_ts === "number"
               ? it.last_seen_ts
-              : typeof it.lastSeen === "number"
-              ? it.lastSeen
               : undefined,
-          imageUrl: it.imageUrl
-            ? buildApiUrl(LOSTFOUND_API_BASE, String(it.imageUrl))
-            : it.image_url
-            ? buildApiUrl(LOSTFOUND_API_BASE, String(it.image_url))
-            : null,
+          imageUrl: resolveLostFoundUrl(it.imageUrl || it.image_url || null),
         }));
 
       setItems(safe);
@@ -296,7 +292,7 @@ function LostAndFoundReportsPageInner() {
       it.label || "",
       it.location || "",
       it.source || "",
-      isLost(it) ? "lost" : isSolved(it) ? "solved" : it.status || "",
+      isLost(it) ? "lost" : isSolved(it) ? "solved" : (it.status || ""),
       fmtTs(it.firstSeenTs),
       fmtTs(it.lastSeenTs),
       it.imageUrl || "",
@@ -304,9 +300,7 @@ function LostAndFoundReportsPageInner() {
 
     const csv = [
       headers.join(","),
-      ...rows.map((r) =>
-        r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")
-      ),
+      ...rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")),
     ].join("\n");
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
