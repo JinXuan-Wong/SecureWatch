@@ -3,6 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getApiBase, resolveApiUrl } from "../api/base";
 
 const MAX_ACTIVE_LIVE_STREAMS = 4;
+const STATE_POLL_MS = 3000;
+const STATUS_POLL_MS = 6000;
+const MAX_STREAM_RETRIES = 5;
 
 type LiveDet = Record<string, any>;
 
@@ -279,6 +282,19 @@ function PausedPreview({
   );
 }
 
+function StreamUnavailableOverlay({ message }: { message: string }) {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
+      <div className="text-center px-4">
+        <div className="text-slate-200 text-sm">{message}</div>
+        <div className="text-slate-500 text-xs mt-2">
+          Stream retry stopped temporarily
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MjpegStream({
   url,
   camId,
@@ -299,10 +315,12 @@ function MjpegStream({
   onRestart?: () => void;
 }) {
   const imgRef = useRef<HTMLImageElement>(null);
-  const [loading, setLoading] = useState(true);
-  const [errCount, setErrCount] = useState(0);
   const retryTimer = useRef<number | null>(null);
   const streamKey = useRef(`${camId}-${String(viewId ?? "")}-${Date.now()}`);
+
+  const [loading, setLoading] = useState(true);
+  const [errCount, setErrCount] = useState(0);
+  const [stopped, setStopped] = useState(false);
 
   const makeUrl = (base: string, bump: number) => {
     const u = new URL(base, window.location.href);
@@ -319,7 +337,7 @@ function MjpegStream({
 
   useEffect(() => {
     const img = imgRef.current;
-    if (!img) return;
+    if (!img || !url) return;
 
     if (retryTimer.current) {
       window.clearTimeout(retryTimer.current);
@@ -328,6 +346,7 @@ function MjpegStream({
 
     setLoading(true);
     setErrCount(0);
+    setStopped(false);
 
     let lastRatio = 0;
 
@@ -346,6 +365,7 @@ function MjpegStream({
     const onLoad = () => {
       setLoading(false);
       setErrCount(0);
+      setStopped(false);
       reportAspect();
     };
 
@@ -354,7 +374,13 @@ function MjpegStream({
 
       setErrCount((prev) => {
         const next = prev + 1;
-        const delay = Math.min(3000, 250 + next * 250);
+
+        if (next >= MAX_STREAM_RETRIES) {
+          setStopped(true);
+          return next;
+        }
+
+        const delay = Math.min(10000, 1500 + next * 1500);
 
         retryTimer.current = window.setTimeout(() => {
           const img2 = imgRef.current;
@@ -374,7 +400,7 @@ function MjpegStream({
     img.src = "";
     img.src = makeUrl(url, 0);
 
-    const aspectTimer = window.setInterval(reportAspect, 800);
+    const aspectTimer = window.setInterval(reportAspect, 1000);
 
     return () => {
       img.removeEventListener("load", onLoad);
@@ -392,7 +418,7 @@ function MjpegStream({
 
   return (
     <>
-      {loading && !videoEnded && (
+      {loading && !videoEnded && !stopped && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-10">
           <div className="text-xs text-slate-200 bg-slate-900/80 px-3 py-2 rounded-lg">
             {errCount > 0 ? `Reconnecting... (${errCount})` : "Connecting..."}
@@ -416,14 +442,17 @@ function MjpegStream({
         </div>
       )}
 
+      {!videoEnded && stopped && (
+        <StreamUnavailableOverlay message="Stream unavailable" />
+      )}
+
       <img
         ref={imgRef}
         className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 ${
-          loading || videoEnded ? "opacity-0" : "opacity-100"
+          loading || videoEnded || stopped ? "opacity-0" : "opacity-100"
         }`}
         alt={`${camId} view ${String(viewId ?? "")}`}
         draggable={false}
-        crossOrigin="anonymous"
       />
     </>
   );
@@ -796,13 +825,16 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
         console.warn("Failed to load detection config:", e);
       }
     };
+
     loadDetectionConfig();
   }, [API_BASE]);
 
   useEffect(() => {
     try {
       localStorage.setItem(`live_fisheye_override_v1_${mode}`, JSON.stringify(fisheyeOverride));
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [fisheyeOverride, mode]);
 
   const handleToggleDetection = async (camId: string, enabled: boolean) => {
@@ -864,7 +896,12 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
     let alive = true;
     if (!API_BASE) return;
 
+    let busy = false;
+
     const tickState = async () => {
+      if (busy) return;
+      busy = true;
+
       try {
         const r = await fetch(`${API_BASE}/api/live/state`, { cache: "no-store" });
         if (!r.ok) throw new Error(`live/state HTTP ${r.status}`);
@@ -875,11 +912,13 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
         }
       } catch (e: any) {
         if (alive) setErr(e?.message || "Failed to load live state");
+      } finally {
+        busy = false;
       }
     };
 
     tickState();
-    const id = window.setInterval(tickState, 1000);
+    const id = window.setInterval(tickState, STATE_POLL_MS);
 
     return () => {
       alive = false;
@@ -890,12 +929,20 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
   useEffect(() => {
     if (!API_BASE) return;
 
+    let busy = false;
+
     const tickStatus = async () => {
-      await checkCameraStatus();
+      if (busy) return;
+      busy = true;
+      try {
+        await checkCameraStatus();
+      } finally {
+        busy = false;
+      }
     };
 
     tickStatus();
-    const id = window.setInterval(tickStatus, 5000);
+    const id = window.setInterval(tickStatus, STATUS_POLL_MS);
 
     return () => window.clearInterval(id);
   }, [API_BASE]);
@@ -1020,7 +1067,7 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
   const liveCount = useMemo(() => rows.filter((x) => !!x.cam).length, [rows]);
 
   return (
-    <div className="h-full w-full px-6 py-4">
+    <div className="h-full w-full px-6 py-4 overflow-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-xl font-semibold text-white">
@@ -1042,13 +1089,13 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
             Active now: <span className="text-slate-300">{activeCamIds.length}</span>
           </div>
         </div>
-
-        {err ? (
-          <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 px-3 py-2 rounded-lg">
-            {err}
-          </div>
-        ) : null}
       </div>
+
+      {err ? (
+        <div className="mb-4 text-sm text-red-300 bg-red-500/10 border border-red-500/30 px-3 py-2 rounded-lg">
+          {err}
+        </div>
+      ) : null}
 
       <div className="space-y-8">
         <section>
