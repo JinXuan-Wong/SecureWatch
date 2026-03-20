@@ -295,57 +295,48 @@ export default function App() {
   
   useEffect(() => {
     if (!isAuthenticated) return;
-    if (!notifConfig?.enabled) return;
 
-    const seen = new Set<string>(); // store already displayed notification IDs
+    const token = getToken();
+    if (!token) return;
 
-    const pollNotifications = async () => {
+    const es = new EventSource(`${ATTIRE_API_BASE}/api/attire/notifications/stream?token=${encodeURIComponent(token)}`);
+
+    es.onmessage = (ev: MessageEvent) => {
       try {
-        const token = getToken();
-        if (!token) return;
+        const payload = JSON.parse(ev.data);
 
-        const r = await fetch(`${ATTIRE_API_BASE}/api/attire/notifications`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (!r.ok) return;
+        const toastId = payload.id;
+        setAttireToasts(prev =>
+          [{
+            id: toastId,
+            title: `Attire Violation: ${String(payload.violation_type || "").toUpperCase()}`,
+            message: `${payload.source_name || payload.source_id || "Unknown"} • ${new Date(payload.timestamp * 1000).toLocaleTimeString()}`,
+            createdAt: Date.now()
+          }, ...prev].slice(0, 5)
+        );
 
-        const data = await r.json();
-        const events = data.events || [];
+        setUnreadAttireNotifs(x => x + 1);
 
-        events.forEach((evt: any) => {
-          if (!seen.has(evt.id)) {
-            seen.add(evt.id);
+        if (notifConfig?.play_sound && notifyAudioRef.current) {
+          notifyAudioRef.current.currentTime = 0;
+          notifyAudioRef.current.play().catch(() => {});
+        }
 
-            const title = `Attire Violation: ${String(evt.violation_type || "").toUpperCase()}`;
-            const msg = `${evt.source_name || evt.source_id || "Unknown"} • ${new Date(evt.timestamp).toLocaleTimeString()}`;
-
-            const toastId = evt.id;
-            setAttireToasts(prev =>
-              [{ id: toastId, title, message: msg, createdAt: Date.now() }, ...prev].slice(0, 5)
-            );
-
-            setUnreadAttireNotifs(x => x + 1);
-
-            if (notifConfig?.play_sound && notifyAudioRef.current) {
-              notifyAudioRef.current.currentTime = 0;
-              notifyAudioRef.current.play().catch(() => {});
-            }
-
-            setTimeout(() => {
-              setAttireToasts(prev => prev.filter(t => t.id !== toastId));
-            }, (notifConfig?.toast_sec ?? 6) * 1000);
-          }
-        });
+        setTimeout(() => {
+          setAttireToasts(prev => prev.filter(t => t.id !== toastId));
+        }, (notifConfig?.toast_sec ?? 6) * 1000);
       } catch (err) {
-        console.error("Polling notifications failed:", err);
+        console.error("Failed to parse SSE payload:", err);
       }
     };
 
-    pollNotifications(); // initial call
-    const interval = setInterval(pollNotifications, 3000); // poll every 3s
+    es.onerror = (err) => {
+      console.error("SSE connection error:", err);
+      // DO NOT close here. Let EventSource retry automatically.
+    };
 
-    return () => clearInterval(interval);
-  }, [isAuthenticated, notifConfig]);
+    return () => es.close();
+  }, [isAuthenticated]); // only depends on auth
 
   useEffect(() => {
     notifConfigRef.current = notifConfig;
