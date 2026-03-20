@@ -302,89 +302,54 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
       return;
     }
 
-    if (!reportHeaderRef.current || !chartsRef.current || !tableRef.current) {
-      return;
+    if (!chartsRef.current) return;
+
+    try {
+      const chartsCanvas = await html2canvas(chartsRef.current, {
+        scale: 2,
+        backgroundColor: "#0f172a",
+        useCORS: true,
+        scrollY: -window.scrollY,
+      });
+
+      const chartImage = chartsCanvas.toDataURL("image/png");
+
+      const payload: Record<string, any> = {
+        start: startDate,
+        end: endDate,
+        vtype: filterType,
+        status: filterStatus,
+        chart_image: chartImage,
+      };
+
+      if (filterSourceId !== "All") {
+        payload.video_id = filterSourceId;
+      }
+
+      const res = await fetch(`${API_BASE}/api/attire/reports/export.pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "attire_report.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Failed to export PDF: ${String(e?.message || e)}`);
     }
-
-    const pdf = new jsPDF("p", "mm", "a4");
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 10;
-    const usableWidth = pageWidth - margin * 2;
-    let y = margin;
-
-    const addCanvasToPdf = (
-      canvas: HTMLCanvasElement,
-      opts?: { newPageIfNeeded?: boolean }
-    ) => {
-      const imgData = canvas.toDataURL("image/png");
-      const imgWidth = usableWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-      if (opts?.newPageIfNeeded && y + imgHeight > pageHeight - margin) {
-        pdf.addPage();
-        y = margin;
-      }
-
-      // if image fits in remaining page
-      if (imgHeight <= pageHeight - margin * 2) {
-        if (y + imgHeight > pageHeight - margin) {
-          pdf.addPage();
-          y = margin;
-        }
-        pdf.addImage(imgData, "PNG", margin, y, imgWidth, imgHeight);
-        y += imgHeight + 6;
-        return;
-      }
-
-      // split tall image across multiple pages
-      let remainingHeight = imgHeight;
-      let position = y;
-
-      while (remainingHeight > 0) {
-        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-        remainingHeight -= (pageHeight - margin - position);
-        if (remainingHeight > 0) {
-          pdf.addPage();
-          position = margin - (imgHeight - remainingHeight);
-          y = margin;
-        } else {
-          y = pageHeight - margin + 6;
-        }
-      }
-    };
-
-    const headerCanvas = await html2canvas(reportHeaderRef.current, {
-      scale: 2,
-      backgroundColor: "#0f172a",
-      useCORS: true,
-      scrollY: -window.scrollY,
-    });
-
-    const chartsCanvas = await html2canvas(chartsRef.current, {
-      scale: 2,
-      backgroundColor: "#0f172a",
-      useCORS: true,
-      scrollY: -window.scrollY,
-    });
-
-    const tableCanvas = await html2canvas(tableRef.current, {
-      scale: 2,
-      backgroundColor: "#0f172a",
-      useCORS: true,
-      scrollY: -window.scrollY,
-    });
-
-    // 1) title/header first
-    addCanvasToPdf(headerCanvas);
-
-    // 2) chart image after title
-    addCanvasToPdf(chartsCanvas, { newPageIfNeeded: true });
-
-    // 3) table after charts
-    addCanvasToPdf(tableCanvas, { newPageIfNeeded: true });
-
-    pdf.save("attire_compliance_report.pdf");
   };
 
   return (
