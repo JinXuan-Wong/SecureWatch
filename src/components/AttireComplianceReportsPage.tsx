@@ -1,9 +1,11 @@
 // AttireComplianceReportsPage.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Filter, TrendingUp, AlertTriangle, CheckCircle, AlertCircle } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import { ATTIRE_API_BASE } from "../api/base";
 
 const API_BASE = ATTIRE_API_BASE;
@@ -85,6 +87,9 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
   // default last 7 days
   const [startDate, setStartDate] = useState<string>(() => toDateInputValue(new Date(Date.now() - 6 * 86400000)));
   const [endDate, setEndDate] = useState<string>(() => toDateInputValue(new Date()));
+  const reportHeaderRef = useRef<HTMLDivElement | null>(null);
+  const chartsRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLDivElement | null>(null);
   const [filterType, setFilterType] = useState<string>("All");
   const [filterStatus, setFilterStatus] = useState<string>("All");
   const [viewLabelByVideo, setViewLabelByVideo] = useState<Record<string, Record<string, string>>>({});
@@ -291,118 +296,196 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
     window.open(`${API_BASE}/api/attire/reports/export.csv?${qs.toString()}`, "_blank");
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!canExport) {
       alert("Export is restricted to Admin accounts.");
       return;
     }
-    const qs = new URLSearchParams({
-      start: startDate,
-      end: endDate,
-      vtype: filterType,
-      status: filterStatus,
+
+    if (!reportHeaderRef.current || !chartsRef.current || !tableRef.current) {
+      return;
+    }
+
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    const usableWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const addCanvasToPdf = (
+      canvas: HTMLCanvasElement,
+      opts?: { newPageIfNeeded?: boolean }
+    ) => {
+      const imgData = canvas.toDataURL("image/png");
+      const imgWidth = usableWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      if (opts?.newPageIfNeeded && y + imgHeight > pageHeight - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+
+      // if image fits in remaining page
+      if (imgHeight <= pageHeight - margin * 2) {
+        if (y + imgHeight > pageHeight - margin) {
+          pdf.addPage();
+          y = margin;
+        }
+        pdf.addImage(imgData, "PNG", margin, y, imgWidth, imgHeight);
+        y += imgHeight + 6;
+        return;
+      }
+
+      // split tall image across multiple pages
+      let remainingHeight = imgHeight;
+      let position = y;
+
+      while (remainingHeight > 0) {
+        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+        remainingHeight -= (pageHeight - margin - position);
+        if (remainingHeight > 0) {
+          pdf.addPage();
+          position = margin - (imgHeight - remainingHeight);
+          y = margin;
+        } else {
+          y = pageHeight - margin + 6;
+        }
+      }
+    };
+
+    const headerCanvas = await html2canvas(reportHeaderRef.current, {
+      scale: 2,
+      backgroundColor: "#0f172a",
+      useCORS: true,
+      scrollY: -window.scrollY,
     });
-    if (filterSourceId !== "All") qs.set("video_id", filterSourceId);
-    window.open(`${API_BASE}/api/attire/reports/export.pdf?${qs.toString()}`, "_blank");
+
+    const chartsCanvas = await html2canvas(chartsRef.current, {
+      scale: 2,
+      backgroundColor: "#0f172a",
+      useCORS: true,
+      scrollY: -window.scrollY,
+    });
+
+    const tableCanvas = await html2canvas(tableRef.current, {
+      scale: 2,
+      backgroundColor: "#0f172a",
+      useCORS: true,
+      scrollY: -window.scrollY,
+    });
+
+    // 1) title/header first
+    addCanvasToPdf(headerCanvas);
+
+    // 2) chart image after title
+    addCanvasToPdf(chartsCanvas, { newPageIfNeeded: true });
+
+    // 3) table after charts
+    addCanvasToPdf(tableCanvas, { newPageIfNeeded: true });
+
+    pdf.save("attire_compliance_report.pdf");
   };
 
   return (
-    <div className="flex-1 p-6 overflow-y-auto overflow-x-hidden min-w-0">
-      <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-white mb-1">Attire Compliance Reports</h2>
-            <p className="text-slate-400">Track and analyze dress code compliance violations</p>
-            {loading && <div className="text-slate-500 text-sm mt-1">Loading…</div>}
-            {err && <div className="text-red-400 text-sm mt-1">{err}</div>}
+    <div className="flex-1 p-6 overflow-y-auto overflow-x-hidden min-w-0 bg-[#0f172a]">
+      <div ref={reportHeaderRef}>
+        <div className="mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-white mb-1">Attire Compliance Reports</h2>
+              <p className="text-slate-400">Track and analyze dress code compliance violations</p>
+              {loading && <div className="text-slate-500 text-sm mt-1">Loading…</div>}
+              {err && <div className="text-red-400 text-sm mt-1">{err}</div>}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {canExport ? (
+                <>
+                  <button
+                    onClick={handleExportPDF}
+                    className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export PDF
+                  </button>
+
+                  <button
+                    onClick={handleExportExcel}
+                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Excel
+                  </button>
+                </>
+              ) : (
+                <div className="text-slate-400 text-sm">
+                  Export is restricted to Admin accounts.
+                </div>
+              )}
+            </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-2">
-            {canExport ? (
-              <>
-                <button
-                  onClick={handleExportPDF}
-                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  Export PDF
-                </button>
-
-                <button
-                  onClick={handleExportExcel}
-                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  Export Excel
-                </button>
-              </>
-            ) : (
-              <div className="text-slate-400 text-sm">
-                Export is restricted to Admin accounts.
+        {/* Summary */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-orange-500/20 rounded-lg flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-orange-400" />
               </div>
-            )}
+              <div>
+                <div className="text-slate-400 text-sm">Total Violations</div>
+                <div className="text-white text-2xl">{totalViolations}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900/50 border border-green-900/30 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <div className="text-slate-400 text-sm">Resolved Cases</div>
+                <div className="text-white text-2xl">{resolvedCount}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900/50 border border-red-900/30 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-red-500/20 rounded-lg flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <div className="text-slate-400 text-sm">Pending Cases</div>
+                <div className="text-white text-2xl">{pendingCount}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-purple-400" />
+              </div>
+              <div>
+                <div className="text-slate-400 text-sm">Resolution Rate</div>
+                <div className="text-white text-2xl">{resolvedRate}%</div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+        {/* Most frequent */}
+        <div className="bg-orange-900/20 border border-orange-800 rounded-lg p-4 mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-orange-500/20 rounded-lg flex items-center justify-center">
-              <AlertTriangle className="w-5 h-5 text-orange-400" />
-            </div>
+            <AlertTriangle className="w-5 h-5 text-orange-400" />
             <div>
-              <div className="text-slate-400 text-sm">Total Violations</div>
-              <div className="text-white text-2xl">{totalViolations}</div>
+              <div className="text-orange-300 text-sm">Most Frequent Violation</div>
+              <div className="text-white">{mostFrequentViolation}</div>
             </div>
-          </div>
-        </div>
-
-        <div className="bg-slate-900/50 border border-green-900/30 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
-              <CheckCircle className="w-5 h-5 text-green-400" />
-            </div>
-            <div>
-              <div className="text-slate-400 text-sm">Resolved Cases</div>
-              <div className="text-white text-2xl">{resolvedCount}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-slate-900/50 border border-red-900/30 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-red-500/20 rounded-lg flex items-center justify-center">
-              <AlertCircle className="w-5 h-5 text-red-400" />
-            </div>
-            <div>
-              <div className="text-slate-400 text-sm">Pending Cases</div>
-              <div className="text-white text-2xl">{pendingCount}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-purple-400" />
-            </div>
-            <div>
-              <div className="text-slate-400 text-sm">Resolution Rate</div>
-              <div className="text-white text-2xl">{resolvedRate}%</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Most frequent */}
-      <div className="bg-orange-900/20 border border-orange-800 rounded-lg p-4 mb-6">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-orange-400" />
-          <div>
-            <div className="text-orange-300 text-sm">Most Frequent Violation</div>
-            <div className="text-white">{mostFrequentViolation}</div>
           </div>
         </div>
       </div>
@@ -469,14 +552,79 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-2 gap-6 mb-6">
-        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-          <h3 className="text-white mb-4">Violation Type Frequency</h3>
+      <div ref={chartsRef}>
+        <div className="grid grid-cols-2 gap-6 mb-6">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
+            <h3 className="text-white mb-4">Violation Type Frequency</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={violationTypeChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="name" stroke="#94a3b8" />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1e293b",
+                    border: "1px solid #334155",
+                    borderRadius: "8px",
+                    color: "#fff",
+                  }}
+                />
+                <Bar dataKey="count" fill="#f97316" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
+            <h3 className="text-white mb-4">Last 8 Days Trend</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={dailyTrendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis
+                  dataKey="day"
+                  tick={<DailyTick />}
+                  height={40}
+                  interval={0}
+                  minTickGap={0}
+                />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1e293b",
+                    border: "1px solid #334155",
+                    borderRadius: "8px",
+                    color: "#fff",
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="violations"
+                  stroke="#ef4444"
+                  strokeWidth={3}
+                  dot={{ r: 6 }}
+                  activeDot={{ r: 8 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6 mb-6">
+          <h3 className="text-white mb-4">Status Distribution</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={violationTypeChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis dataKey="name" stroke="#94a3b8" />
-              <YAxis stroke="#94a3b8" />
+            <PieChart>
+              <Pie
+                data={statusData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                outerRadius={100}
+                dataKey="value"
+              >
+                {statusData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#1e293b",
@@ -485,76 +633,16 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
                   color: "#fff",
                 }}
               />
-              <Bar dataKey="count" fill="#f97316" radius={[8, 8, 0, 0]} />
-            </BarChart>
+            </PieChart>
           </ResponsiveContainer>
         </div>
-
-        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-          <h3 className="text-white mb-4">Last 8 Days Trend</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={dailyTrendData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis
-                dataKey="day"
-                tick={<DailyTick />}
-                height={40}
-                interval={0}
-                minTickGap={0}
-              />
-              <YAxis stroke="#94a3b8" />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#1e293b",
-                  border: "1px solid #334155",
-                  borderRadius: "8px",
-                  color: "#fff",
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="violations"
-                stroke="#ef4444"
-                strokeWidth={3}
-                dot={{ r: 6 }}
-                activeDot={{ r: 8 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6 mb-6">
-        <h3 className="text-white mb-4">Status Distribution</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <PieChart>
-            <Pie
-              data={statusData}
-              cx="50%"
-              cy="50%"
-              labelLine={false}
-              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-              outerRadius={100}
-              dataKey="value"
-            >
-              {statusData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#1e293b",
-                border: "1px solid #334155",
-                borderRadius: "8px",
-                color: "#fff",
-              }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
       </div>
 
       {/* Table */}
-      <div className="bg-slate-900/50 border border-slate-800 rounded-lg overflow-hidden">
+      <div
+        ref={tableRef}
+        className="bg-slate-900/50 border border-slate-800 rounded-lg overflow-hidden"
+      >
         <div className="px-6 py-4 border-b border-slate-800">
           <h3 className="text-white">Historical Violations</h3>
         </div>
@@ -592,6 +680,7 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
                             alt={titleCaseViolation(e.label)}
                             className="w-full h-full object-cover"
                             loading="lazy"
+                            crossOrigin="anonymous"
                           />
                         </a>
                       ) : (
