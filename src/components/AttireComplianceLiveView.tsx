@@ -43,6 +43,9 @@ async function fetchRtspDetectionsSafe(
 ): Promise<{ ts: number; fps: number; resolution: [number, number]; detections: Detection[] } | null> {
   try {
     const res = await fetch(`${API_BASE}/api/rtsp/live/${rtspId}/detections`);
+    if (res.status === 429) {
+      return { ts: Date.now(), fps: 0, resolution: [0, 0], detections: [] };
+    }
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -73,6 +76,9 @@ async function fetchOfflineDetections(
   videoId: string
 ): Promise<{ ts: number; fps: number; resolution: [number, number]; detections: Detection[] }> {
   const res = await fetch(`${API_BASE}/api/offline/live/${videoId}/detections`);
+  if (res.status === 429) {
+    return { ts: Date.now(), fps: 0, resolution: [0, 0], detections: [] };
+  }
   if (!res.ok) throw new Error("Failed to load offline detections");
   return res.json();
 }
