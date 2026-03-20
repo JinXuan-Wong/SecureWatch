@@ -295,116 +295,57 @@ export default function App() {
   
   useEffect(() => {
     if (!isAuthenticated) return;
+    if (!notifConfig?.enabled) return;
 
-    const token = getToken();
-    if (!token) return;
+    const seen = new Set<string>(); // store already displayed notification IDs
 
-    const base = ATTIRE_API_BASE;
-    const sseUrl = `${base}/api/attire/notifications/stream?token=${encodeURIComponent(token)}`;
-
-    let es: EventSource | null = null;
-    let retryTimer: number | null = null;
-    let closed = false;
-
-    const connect = () => {
-      if (closed) return;
-
-      console.log("[NOTIF] opening SSE:", sseUrl);
-      es = new EventSource(sseUrl);
-
-      es.onopen = () => {
-        console.log("[NOTIF] SSE opened");
-      };
-
-      es.onerror = (err) => {
-        console.error("[NOTIF] SSE error:", err);
-
-        try {
-          es?.close();
-        } catch {}
-
-        if (!closed) {
-          retryTimer = window.setTimeout(() => {
-            connect();
-          }, 3000);
-        }
-      };
-
-      es.addEventListener("config", (ev: any) => {
-        console.log("[NOTIF] config raw:", ev.data);
-        try {
-          const parsed = JSON.parse(ev.data);
-          console.log("[NOTIF] config parsed:", parsed);
-          setNotifConfig(parsed);
-        } catch (e) {
-          console.error("[NOTIF] config parse failed:", e);
-        }
-      });
-
-      es.onmessage = (ev: MessageEvent) => {
-        console.log("[NOTIF] onmessage raw:", ev.data);
-
-        try {
-          const cfg = notifConfigRef.current;
-          console.log("[NOTIF] current cfg:", cfg);
-
-          if (cfg && cfg.enabled === false) {
-            console.log("[NOTIF] notification ignored because cfg.enabled = false");
-            return;
-          }
-
-          const n = JSON.parse(ev.data);
-          console.log("[NOTIF] onmessage parsed:", n);
-
-          const title = `Attire Violation: ${String(n.violation_type || "").toUpperCase()}`;
-          const msg = `${n.source_name || n.source_id || "Unknown source"} • ${new Date().toLocaleTimeString()}`;
-
-          const toastId = n.id || `${Date.now()}-${Math.random()}`;
-
-          setAttireToasts((prev) =>
-            [
-              {
-                id: toastId,
-                title,
-                message: msg,
-                createdAt: Date.now(),
-              },
-              ...prev,
-            ].slice(0, 5)
-          );
-
-          setUnreadAttireNotifs((x) => x + 1);
-
-          const durationMs = Math.max(1, Number(cfg?.toast_sec ?? 6)) * 1000;
-          window.setTimeout(() => {
-            setAttireToasts((prev) => prev.filter((x) => x.id !== toastId));
-          }, durationMs);
-
-          if (cfg?.play_sound) {
-            const a = notifyAudioRef.current;
-            if (a) {
-              try {
-                a.currentTime = 0;
-                a.play().catch(() => {});
-              } catch {}
-            }
-          }
-        } catch (e) {
-          console.error("[NOTIF] onmessage parse failed:", e);
-        }
-      };
-    };
-
-    connect();
-
-    return () => {
-      closed = true;
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    const pollNotifications = async () => {
       try {
-        es?.close();
-      } catch {}
+        const token = getToken();
+        if (!token) return;
+
+        const r = await fetch(`${ATTIRE_API_BASE}/api/attire/notifications`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!r.ok) return;
+
+        const data = await r.json();
+        const events = data.events || [];
+
+        events.forEach((evt: any) => {
+          if (!seen.has(evt.id)) {
+            seen.add(evt.id);
+
+            const title = `Attire Violation: ${String(evt.violation_type || "").toUpperCase()}`;
+            const msg = `${evt.source_name || evt.source_id || "Unknown"} • ${new Date(evt.timestamp).toLocaleTimeString()}`;
+
+            const toastId = evt.id;
+            setAttireToasts(prev =>
+              [{ id: toastId, title, message: msg, createdAt: Date.now() }, ...prev].slice(0, 5)
+            );
+
+            setUnreadAttireNotifs(x => x + 1);
+
+            if (notifConfig?.play_sound && notifyAudioRef.current) {
+              notifyAudioRef.current.currentTime = 0;
+              notifyAudioRef.current.play().catch(() => {});
+            }
+
+            setTimeout(() => {
+              setAttireToasts(prev => prev.filter(t => t.id !== toastId));
+            }, (notifConfig?.toast_sec ?? 6) * 1000);
+          }
+        });
+      } catch (err) {
+        console.error("Polling notifications failed:", err);
+      }
     };
-  }, [isAuthenticated]);
+
+    pollNotifications(); // initial call
+    const interval = setInterval(pollNotifications, 3000); // poll every 3s
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated, notifConfig]);
 
   useEffect(() => {
     notifConfigRef.current = notifConfig;
