@@ -172,6 +172,63 @@ function getLabelColor(v?: Violation) {
   }
 }
 
+function MjpegStream({
+  src,
+  alt,
+  className,
+  isTabVisible,
+  onReload,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  isTabVisible: boolean;
+  onReload: () => void;
+}) {
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
+
+  useEffect(() => {
+    setHasFirstFrame(false);
+  }, [src]);
+
+  useEffect(() => {
+    if (!isTabVisible) return;
+
+    const t = window.setInterval(() => {
+      const img = imgRef.current;
+      if (!img) return;
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setHasFirstFrame(true);
+      }
+    }, 250);
+
+    return () => window.clearInterval(t);
+  }, [src, isTabVisible]);
+
+  return (
+    <div className="absolute inset-0">
+      {!hasFirstFrame && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950 text-slate-400 text-sm z-10">
+          Connecting...
+        </div>
+      )}
+
+      <img
+        ref={imgRef}
+        src={src}
+        alt={alt}
+        className={`absolute inset-0 w-full h-full object-cover ${hasFirstFrame ? "opacity-100" : "opacity-0"} ${className || ""}`}
+        onLoad={() => setHasFirstFrame(true)}
+        onError={() => {
+          if (!isTabVisible) return;
+          window.setTimeout(onReload, 800);
+        }}
+      />
+    </div>
+  );
+}
+
 type TileProps = {
   src: GridSource;
   apiBase: string;
@@ -208,14 +265,11 @@ const LiveTile = React.memo(function LiveTile({
         </div>
 
         <div className="relative aspect-video bg-slate-950 overflow-hidden">
-          <img
+          <MjpegStream
             src={streamUrl}
-            className="absolute inset-0 w-full h-full object-cover"
             alt="Webcam stream"
-            onError={() => {
-              if (!isTabVisible) return;
-              window.setTimeout(() => onReload(WEBCAM_ID), 500);
-            }}
+            isTabVisible={isTabVisible}
+            onReload={() => onReload(WEBCAM_ID)}
           />
 
           {detections.map((d) => (
@@ -261,14 +315,11 @@ const LiveTile = React.memo(function LiveTile({
         </div>
 
         <div className="relative aspect-video bg-slate-950 overflow-hidden">
-          <img
+          <MjpegStream
             src={streamUrl}
-            className="absolute inset-0 w-full h-full object-cover"
             alt={`RTSP ${s.name}`}
-            onError={() => {
-              if (!isTabVisible) return;
-              window.setTimeout(() => onReload(s.id), 500);
-            }}
+            isTabVisible={isTabVisible}
+            onReload={() => onReload(s.id)}
           />
 
           {detections.map((d) => (
@@ -324,14 +375,11 @@ const LiveTile = React.memo(function LiveTile({
       </div>
 
       <div className="relative aspect-video bg-slate-950 overflow-hidden">
-        <img
+        <MjpegStream
           src={streamUrl}
-          className="absolute inset-0 w-full h-full object-cover"
           alt={`Uploaded video ${v.name}`}
-          onError={() => {
-            if (!isTabVisible) return;
-            window.setTimeout(() => onReload(v.id), 500);
-          }}
+          isTabVisible={isTabVisible}
+          onReload={() => onReload(v.id)}
         />
 
         {detections.map((d) => (
@@ -531,7 +579,7 @@ export function AttireComplianceLiveView() {
         // ignore
       } finally {
         if (!stopped) {
-          timer = window.setTimeout(loop, 1000);
+          timer = window.setTimeout(loop, 1500);
         }
       }
     };
@@ -644,8 +692,8 @@ export function AttireComplianceLiveView() {
     if (!offlineLoaded || !rtspLoaded || !enabledLoaded) return;
     const slots = showWebcam ? MAX_LIVE - 1 : MAX_LIVE;
 
-    // safer: unknown IDs default to false during enforcement
-    const isEnabled = (id: string) => enabledMap[id] === true;
+    // keep default behavior consistent: unknown IDs are treated as enabled
+    const isEnabled = (id: string) => enabledMap[id] ?? true;
 
     const orderedIds = [
       ...(selectedVideoId && isEnabled(selectedVideoId) ? [selectedVideoId] : []),
@@ -787,7 +835,7 @@ export function AttireComplianceLiveView() {
         console.warn("poll detections failed:", e);
       } finally {
         if (!stopped) {
-          timer = window.setTimeout(loop, 1000);
+          timer = window.setTimeout(loop, 1500);
         }
       }
     };

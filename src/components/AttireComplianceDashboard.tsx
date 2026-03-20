@@ -232,6 +232,7 @@ export function AttireDashboard({
   const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
   
   const MAX_LIVE = 4;
+  const MAX_ACTIVE_THUMBS = 6;
 
   const [showWebcam, setShowWebcam] = useState<boolean>(() => {
     return localStorage.getItem("attire:showWebcam") === "1";
@@ -278,26 +279,42 @@ export function AttireDashboard({
     return getFloorFromName(key) === floorFilter;
   };
 
-  const DASHBOARD_THUMB_INTERVAL_MS = 10000; // refresh every 2 sec
+  const DASHBOARD_THUMB_INTERVAL_MS = 10000; // refresh every 10 sec
 
+  const [isVisible, setIsVisible] = useState(() => !document.hidden);
   const [thumbTick, setThumbTick] = useState(0);
 
   useEffect(() => {
+    const onVis = () => setIsVisible(!document.hidden);
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
+
     const t = window.setInterval(() => {
       setThumbTick((x) => x + 1);
     }, DASHBOARD_THUMB_INTERVAL_MS);
 
     return () => window.clearInterval(t);
-  }, []);
+  }, [isVisible]);
 
-  const getThumbUrl = (s: SourceItem): string | null => {
+  const getThumbBaseUrl = (s: SourceItem): string | null => {
     if (!s?.id) return null;
 
     if (s.kind === "rtsp") {
-      return `${API_BASE}/api/rtsp/thumb/${s.id}?t=${thumbTick}`;
+      return `${API_BASE}/api/rtsp/thumb/${s.id}`;
     }
 
-    return `${API_BASE}/api/offline/thumb/${s.id}?t=${thumbTick}`;
+    return `${API_BASE}/api/offline/thumb/${s.id}`;
+  };
+
+  const getThumbUrl = (s: SourceItem, active: boolean): string | null => {
+    const base = getThumbBaseUrl(s);
+    if (!base) return null;
+
+    return active ? `${base}?t=${thumbTick}` : base;
   };
 
   useEffect(() => {
@@ -352,7 +369,7 @@ export function AttireDashboard({
     window.addEventListener("attire:sourcesChanged", onChanged);
     window.addEventListener("storage", onChanged);
 
-    const t = window.setInterval(load, 5000);
+    const t = window.setInterval(load, 15000);
 
     return () => {
       cancelled = true;
@@ -378,7 +395,7 @@ export function AttireDashboard({
     };
 
     tick();
-    const t = window.setInterval(tick, 3000);
+    const t = window.setInterval(tick, 8000);
     return () => {
       cancelled = true;
       window.clearInterval(t);
@@ -586,7 +603,7 @@ export function AttireDashboard({
 
             <div className="mt-4">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
-                {filteredSources.map((s) => (
+                {filteredSources.map((s, idx) => (
                   <CameraTile
                     key={s.id}
                     id={s.id}
@@ -600,7 +617,7 @@ export function AttireDashboard({
                     }
                     selected={selectedCamera === s.id}
                     enabled={enabledMap[s.id] ?? true}
-                    thumbUrl={getThumbUrl(s)}
+                    thumbUrl={getThumbUrl(s, idx < MAX_ACTIVE_THUMBS)}
                     onClick={() => onSelectCamera(s.id)}
                     onToggleEnabled={() => toggleEnabledFromTile(s.id)}
                   />
