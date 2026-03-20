@@ -278,7 +278,7 @@ export function AttireDashboard({
     return getFloorFromName(key) === floorFilter;
   };
 
-  const DASHBOARD_THUMB_INTERVAL_MS = 2000; // refresh every 2 sec
+  const DASHBOARD_THUMB_INTERVAL_MS = 10000; // refresh every 2 sec
 
   const [thumbTick, setThumbTick] = useState(0);
 
@@ -304,38 +304,46 @@ export function AttireDashboard({
     let cancelled = false;
 
     const load = async () => {
-      try {
-        const [vids, rtsps, enabled] = await Promise.all([
-          fetchUploadedVideos(),
-          fetchRtspSources(),
-          fetchEnabledSources(),
-        ]);
-        if (cancelled) return;
+      const [vidsRes, rtspsRes, enabledRes] = await Promise.allSettled([
+        fetchUploadedVideos(),
+        fetchRtspSources(),
+        fetchEnabledSources(),
+      ]);
 
-        const offline: SourceItem[] = (Array.isArray(vids) ? vids : []).map((v) => ({
-          kind: "offline",
-          ...v,
-        }));
+      const vids =
+        vidsRes.status === "fulfilled" ? vidsRes.value : [];
 
-        const rtsp: SourceItem[] = (Array.isArray(rtsps) ? rtsps : []).map((s) => ({
-          kind: "rtsp",
-          ...s,
-          uploadDate: "",
-          size: "",
-        }));
+      const rtsps =
+        rtspsRes.status === "fulfilled" ? rtspsRes.value : [];
 
-        const merged = [...offline, ...rtsp];
-        merged.sort((a, b) => (a.id || "").localeCompare(b.id || ""));
+      const enabled =
+        enabledRes.status === "fulfilled" ? enabledRes.value : {};
 
-        setSources(merged);
-        setEnabledMap(enabled || {});
-        setErr(null);
-      } catch (e: any) {
-        if (cancelled) return;
-        setErr(String(e?.message || e));
-        setSources([]);
-        setEnabledMap({});
-      }
+      const offline: SourceItem[] = vids.map((v) => ({
+        kind: "offline",
+        ...v,
+      }));
+
+      const rtsp: SourceItem[] = rtsps.map((s) => ({
+        kind: "rtsp",
+        ...s,
+        uploadDate: "",
+        size: "",
+      }));
+
+      const merged = [...offline, ...rtsp];
+      merged.sort((a, b) => (a.id || "").localeCompare(b.id || ""));
+
+      setSources(merged);
+      setEnabledMap(enabled);
+
+      const errors = [
+        vidsRes.status === "rejected" ? "videos" : "",
+        rtspsRes.status === "rejected" ? "rtsp" : "",
+        enabledRes.status === "rejected" ? "enabled sources" : "",
+      ].filter(Boolean);
+
+      setErr(errors.length ? `Partial load failed: ${errors.join(", ")}` : null);
     };
 
     load();
