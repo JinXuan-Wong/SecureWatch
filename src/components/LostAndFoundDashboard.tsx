@@ -27,21 +27,19 @@ function makeAlertUiKey(alert: Alert, idx: number) {
   return `${alert.id}_${alert.cameraId}_${alert.timestamp.getTime()}_${idx}`;
 }
 
-function getCameraType(cam: Camera) {
-  const c = cam as Camera & {
-    video_type?: string;
-    type?: string;
-    camera_type?: string;
-    source_type?: string;
-  };
+function getFloorFromCamera(cam: Camera) {
+  const key = `${cam.name || ""} ${cam.location || ""} ${cam.id || ""}`.toUpperCase();
 
-  return (
-    c.video_type ||
-    c.type ||
-    c.camera_type ||
-    c.source_type ||
-    "normal"
-  ).toLowerCase();
+  // Prefer the same logic style as Attire dashboard:
+  // first detected digit 0 => GF, 1 => 1F, 2 => 2F
+  const match = key.match(/[012]/);
+  const digit = match ? match[0] : "";
+
+  if (digit === "0") return "GF";
+  if (digit === "1") return "1F";
+  if (digit === "2") return "2F";
+
+  return "OTHER";
 }
 
 function AlertCard({
@@ -219,49 +217,53 @@ export function LostFoundDashboard({
 }: Props) {
   const [searchTerm, setSearchTerm] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+
   const [statusFilter, setStatusFilter] = useState<
-    "all" | "online" | "offline" | "warning"
+    "all" | "online" | "warning" | "offline"
   >("all");
-  const [typeFilter, setTypeFilter] = useState<
-    "all" | "normal" | "fisheye"
-  >("all");
+
+  const [floorFilter, setFloorFilter] = useState<
+    "ALL" | "GF" | "1F" | "2F"
+  >("ALL");
 
   const filteredCameras = useMemo(() => {
     return cameras.filter((cam) => {
       const keyword = searchTerm.trim().toLowerCase();
-      const camType = getCameraType(cam);
 
       const matchesSearch =
         keyword === "" ||
-        cam.name.toLowerCase().includes(keyword) ||
-        cam.location.toLowerCase().includes(keyword) ||
-        cam.id.toLowerCase().includes(keyword);
+        (cam.name || "").toLowerCase().includes(keyword) ||
+        (cam.location || "").toLowerCase().includes(keyword) ||
+        (cam.id || "").toLowerCase().includes(keyword);
 
       const matchesStatus =
         statusFilter === "all" ? true : cam.status === statusFilter;
 
-      const matchesType =
-        typeFilter === "all"
-          ? true
-          : typeFilter === "fisheye"
-          ? camType.includes("fisheye")
-          : !camType.includes("fisheye");
+      const camFloor = getFloorFromCamera(cam);
+      const matchesFloor =
+        floorFilter === "ALL" ? true : camFloor === floorFilter;
 
-      return matchesSearch && matchesStatus && matchesType;
+      return matchesSearch && matchesStatus && matchesFloor;
     });
-  }, [cameras, searchTerm, statusFilter, typeFilter]);
+  }, [cameras, searchTerm, statusFilter, floorFilter]);
 
   return (
     <>
       {!isFullscreen && (
         <div className="mt-4 bg-slate-900/40 border border-slate-800 rounded-2xl p-4">
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
-              <div>
-                <div className="text-white">Lost &amp; Found Monitoring</div>
-                <div className="text-slate-400 text-sm mt-1">
-                  Fisheye swaps between Group A and Group B every 30s.
-                </div>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {onToggleFullscreen && (
+                  <button
+                    type="button"
+                    onClick={onToggleFullscreen}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white hover:bg-slate-700"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                    Fullscreen
+                  </button>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -276,82 +278,101 @@ export function LostFoundDashboard({
                   />
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowFilters((v) => !v)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white hover:bg-slate-700"
-                >
-                  <Filter className="w-4 h-4" />
-                  Filters
-                </button>
-
-                {onToggleFullscreen && (
+                <div className="relative">
                   <button
                     type="button"
-                    onClick={onToggleFullscreen}
+                    onClick={() => setShowFilters((v) => !v)}
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white hover:bg-slate-700"
                   >
-                    <Maximize2 className="w-4 h-4" />
-                    Fullscreen
+                    <Filter className="w-4 h-4" />
+                    Filters
                   </button>
-                )}
-              </div>
-            </div>
 
-            {showFilters && (
-              <div className="flex flex-wrap items-center gap-3 border border-slate-800 rounded-2xl bg-slate-950/40 p-4">
-                <select
-                  value={statusFilter}
-                  onChange={(e) =>
-                    setStatusFilter(
-                      e.target.value as "all" | "online" | "offline" | "warning"
-                    )
-                  }
-                  className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white outline-none"
-                >
-                  <option value="all">All Status</option>
-                  <option value="online">Online</option>
-                  <option value="warning">Warning</option>
-                  <option value="offline">Offline</option>
-                </select>
+                  {showFilters && (
+                    <div className="absolute right-0 mt-2 w-56 bg-slate-950 border border-slate-800 rounded-xl shadow-lg p-2 z-50">
+                      <div className="text-slate-300 text-xs px-2 py-1">
+                        Filter by Floor
+                      </div>
 
-                <select
-                  value={typeFilter}
-                  onChange={(e) =>
-                    setTypeFilter(e.target.value as "all" | "normal" | "fisheye")
-                  }
-                  className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white outline-none"
-                >
-                  <option value="all">All Types</option>
-                  <option value="normal">Normal</option>
-                  <option value="fisheye">Fisheye</option>
-                </select>
+                      {[
+                        { key: "ALL", label: "All Floors" },
+                        { key: "GF", label: "Ground Floor" },
+                        { key: "1F", label: "Floor 1" },
+                        { key: "2F", label: "Floor 2" },
+                      ].map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => {
+                            setFloorFilter(item.key as "ALL" | "GF" | "1F" | "2F");
+                            setShowFilters(false);
+                          }}
+                          className={
+                            "w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-900/60 " +
+                            (floorFilter === item.key
+                              ? "bg-slate-900/70 text-white"
+                              : "text-slate-200")
+                          }
+                        >
+                          {item.label}
+                        </button>
+                      ))}
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchTerm("");
-                    setStatusFilter("all");
-                    setTypeFilter("all");
-                  }}
-                  className="px-4 py-2 rounded-xl bg-slate-700 text-white hover:bg-slate-600"
-                >
-                  Reset
-                </button>
+                      <div className="mt-2 border-t border-slate-800 pt-2 px-2">
+                        <div className="text-slate-300 text-xs px-0 py-1">
+                          Status
+                        </div>
 
-                <div className="ml-auto text-sm text-slate-400">
-                  {filteredCameras.length} camera
-                  {filteredCameras.length === 1 ? "" : "s"} found
+                        <select
+                          value={statusFilter}
+                          onChange={(e) =>
+                            setStatusFilter(
+                              e.target.value as
+                                | "all"
+                                | "online"
+                                | "warning"
+                                | "offline"
+                            )
+                          }
+                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white outline-none"
+                        >
+                          <option value="all">All Status</option>
+                          <option value="online">Online</option>
+                          <option value="warning">Warning</option>
+                          <option value="offline">Offline</option>
+                        </select>
+                      </div>
+
+                      <div className="mt-2 border-t border-slate-800 pt-2 px-2 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearchTerm("");
+                            setStatusFilter("all");
+                            setFloorFilter("ALL");
+                            setShowFilters(false);
+                          }}
+                          className="text-xs text-slate-400 hover:text-slate-200"
+                        >
+                          Reset
+                        </button>
+
+                        <span className="text-xs text-slate-500">
+                          {filteredCameras.length} found
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
       )}
 
       <div className="mt-6">
         {isFullscreen ? (
-          <div className="grid gap-4 grid-cols-4 auto-rows-[minmax(280px,1fr)]">
+          <div className="grid gap-4 grid-cols-4 auto-rows-[260px] overflow-y-auto max-h-[calc(100vh-120px)]">
             {filteredCameras.map((cam) => (
               <CameraFeed
                 key={cam.id}

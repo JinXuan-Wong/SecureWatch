@@ -3,7 +3,6 @@ import { ATTIRE_API_BASE, LOSTFOUND_API_BASE } from "./api/base";
 
 import { useEffect, useRef, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
-import { ControlBar } from "./components/ControlBar";
 import { UploadVideoPage } from "./components/UploadVideoPage";
 import { EventsPage } from "./components/EventsPage";
 import { SettingsPage } from "./components/SettingsPage";
@@ -95,6 +94,7 @@ export default function App() {
   const [notifConfig, setNotifConfig] = useState<any>(null);
   const notifConfigRef = useRef<any>(null);
   const notifFetchInFlightRef = useRef(false);
+
   async function refreshNotifConfig() {
     if (notifFetchInFlightRef.current) return;
 
@@ -120,21 +120,42 @@ export default function App() {
 
   const role = (me?.role || "Viewer") as "Admin" | "Security" | "Staff" | "Viewer";
   const allowedPagesByRole: Record<typeof role, AppPage[]> = {
-    Admin: ["dashboard","live-attire","live-lostfound","reports","events","settings","upload-video","users"],
-    Security: ["dashboard","live-attire","live-lostfound","reports","events","settings","upload-video"],
-    Staff: ["dashboard","live-attire","live-lostfound","reports","events","settings","upload-video"],
-    Viewer: ["dashboard","live-attire","live-lostfound","reports","events"],
+    Admin: [
+      "dashboard",
+      "live-attire",
+      "live-lostfound",
+      "reports",
+      "events",
+      "settings",
+      "upload-video",
+      "users",
+    ],
+    Security: [
+      "dashboard",
+      "live-attire",
+      "live-lostfound",
+      "reports",
+      "events",
+      "settings",
+      "upload-video",
+    ],
+    Staff: [
+      "dashboard",
+      "live-attire",
+      "live-lostfound",
+      "reports",
+      "events",
+      "settings",
+      "upload-video",
+    ],
+    Viewer: ["dashboard", "live-attire", "live-lostfound", "reports", "events"],
   };
 
   const canAccessPage = (page: AppPage) => allowedPagesByRole[role].includes(page);
-  const canExportReports = role === "Admin"; //only admin can export
+  const canExportReports = role === "Admin";
 
   const [lfCameras, setLfCameras] = useState<Camera[]>([]);
   const [lfAlerts, setLfAlerts] = useState<Alert[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "online" | "warning" | "offline">("all");
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"grid" | "single">("grid");
   const [isGridFullscreen, setIsGridFullscreen] = useState(false);
   const gridWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -143,17 +164,27 @@ export default function App() {
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [currentPage, setCurrentPage] = useState<AppPage>("dashboard");
-  const [monitoringMode, setMonitoringMode] = useState<"lost-found" | "attire">("lost-found");
-  const [settingsView, setSettingsView] = useState<"main" | "lostfound-offline">("main");
-  const [lostFoundOfflineStem, setLostFoundOfflineStem] = useState<string | null>(null);
+  const [monitoringMode, setMonitoringMode] = useState<"lost-found" | "attire">(
+    "lost-found"
+  );
+  const [settingsView, setSettingsView] = useState<"main" | "lostfound-offline">(
+    "main"
+  );
+  const [lostFoundOfflineStem, setLostFoundOfflineStem] = useState<string | null>(
+    null
+  );
   const [activeSources, setActiveSources] = useState<number>(0);
   const [attireTotalSources, setAttireTotalSources] = useState<number>(() => {
-  const v = Number(localStorage.getItem("attire:totalSources") || 0);
+    const v = Number(localStorage.getItem("attire:totalSources") || 0);
     return Number.isFinite(v) && v >= 0 ? v : 0;
   });
+
   const notifyAudioRef = useRef<HTMLAudioElement | null>(null);
+
   useEffect(() => {
-    notifyAudioRef.current = new Audio(`${import.meta.env.BASE_URL}sounds/notify.wav`);
+    notifyAudioRef.current = new Audio(
+      `${import.meta.env.BASE_URL}sounds/notify.wav`
+    );
     notifyAudioRef.current.preload = "auto";
   }, []);
 
@@ -162,7 +193,6 @@ export default function App() {
       const a = notifyAudioRef.current;
       if (!a) return;
 
-      // Try to play once to unlock audio context
       a.play()
         .then(() => {
           a.pause();
@@ -207,7 +237,6 @@ export default function App() {
 
     syncNavFromStorage();
 
-    // your UploadVideoPage dispatches: window.dispatchEvent(new Event("storage"))
     window.addEventListener("storage", syncNavFromStorage);
     window.addEventListener("nav:changed", syncNavFromStorage);
 
@@ -292,30 +321,41 @@ export default function App() {
       }
     })();
   }, []);
-  
+
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const token = getToken();
     if (!token) return;
 
-    const es = new EventSource(`${ATTIRE_API_BASE}/api/attire/notifications/stream?token=${encodeURIComponent(token)}`);
+    const es = new EventSource(
+      `${ATTIRE_API_BASE}/api/attire/notifications/stream?token=${encodeURIComponent(
+        token
+      )}`
+    );
 
     es.onmessage = (ev: MessageEvent) => {
       try {
         const payload = JSON.parse(ev.data);
 
         const toastId = payload.id;
-        setAttireToasts(prev =>
-          [{
-            id: toastId,
-            title: `Attire Violation: ${String(payload.violation_type || "").toUpperCase()}`,
-            message: `${payload.source_name || payload.source_id || "Unknown"} • ${new Date(payload.timestamp * 1000).toLocaleTimeString()}`,
-            createdAt: Date.now()
-          }, ...prev].slice(0, 5)
+        setAttireToasts((prev) =>
+          [
+            {
+              id: toastId,
+              title: `Attire Violation: ${String(
+                payload.violation_type || ""
+              ).toUpperCase()}`,
+              message: `${
+                payload.source_name || payload.source_id || "Unknown"
+              } • ${new Date(payload.timestamp * 1000).toLocaleTimeString()}`,
+              createdAt: Date.now(),
+            },
+            ...prev,
+          ].slice(0, 5)
         );
 
-        setUnreadAttireNotifs(x => x + 1);
+        setUnreadAttireNotifs((x) => x + 1);
 
         if (notifConfig?.play_sound && notifyAudioRef.current) {
           notifyAudioRef.current.currentTime = 0;
@@ -323,7 +363,7 @@ export default function App() {
         }
 
         setTimeout(() => {
-          setAttireToasts(prev => prev.filter(t => t.id !== toastId));
+          setAttireToasts((prev) => prev.filter((t) => t.id !== toastId));
         }, (notifConfig?.toast_sec ?? 6) * 1000);
       } catch (err) {
         console.error("Failed to parse SSE payload:", err);
@@ -332,11 +372,10 @@ export default function App() {
 
     es.onerror = (err) => {
       console.error("SSE connection error:", err);
-      // DO NOT close here. Let EventSource retry automatically.
     };
 
     return () => es.close();
-  }, [isAuthenticated]); // only depends on auth
+  }, [isAuthenticated]);
 
   useEffect(() => {
     notifConfigRef.current = notifConfig;
@@ -351,7 +390,6 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  // ---------- Lost & Found ------------
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -365,8 +403,12 @@ export default function App() {
     const loadLostFoundDashboard = async () => {
       try {
         const [camsRes, alertsRes] = await Promise.all([
-          fetch(`${LOSTFOUND_API_BASE}/api/lostfound/cameras`, { cache: "no-store" }),
-          fetch(`${LOSTFOUND_API_BASE}/api/lostfound/alerts?limit=50`, { cache: "no-store" }),
+          fetch(`${LOSTFOUND_API_BASE}/api/lostfound/cameras`, {
+            cache: "no-store",
+          }),
+          fetch(`${LOSTFOUND_API_BASE}/api/lostfound/alerts?limit=50`, {
+            cache: "no-store",
+          }),
         ]);
 
         const camsJson = await camsRes.json().catch(() => ({}));
@@ -393,10 +435,12 @@ export default function App() {
             const id = String(c.id ?? "");
             const prevCam = prevMap.get(id);
 
-            const backendStatus = (c.status ?? "offline") as "online" | "offline" | "warning";
+            const backendStatus = (c.status ?? "offline") as
+              | "online"
+              | "offline"
+              | "warning";
             const localStatus = prevCam?.status;
 
-            // Keep stronger local failure states instead of letting poll reset them to online
             const mergedStatus: "online" | "offline" | "warning" =
               localStatus === "offline"
                 ? "offline"
@@ -425,7 +469,7 @@ export default function App() {
             id: String(a.id ?? ""),
             cameraId: String(a.cameraId ?? ""),
             cameraName: String(a.cameraName ?? a.cameraId ?? "Unknown"),
-            type: "lost-found",
+            type: "lost-found" as const,
             timestamp: new Date(Number(a.timestamp ?? 0) * 1000),
             severity: (a.severity ?? "medium") as "low" | "medium" | "high",
             message: String(a.message ?? ""),
@@ -446,16 +490,6 @@ export default function App() {
     };
   }, [isAuthenticated, currentPage, monitoringMode]);
 
-  const filteredLfCameras = lfCameras.filter((c) => {
-    const s = searchTerm.toLowerCase();
-    const matchSearch =
-      (c.name || "").toLowerCase().includes(s) ||
-      (c.id || "").toLowerCase().includes(s);
-
-    const matchStatus = statusFilter === "all" ? true : c.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
   const handleGridFullscreen = async () => {
     const el = gridWrapRef.current;
     if (!el) return;
@@ -475,18 +509,6 @@ export default function App() {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
-  const toggleViewMode = () => {
-    setViewMode((v) => {
-      const next = v === "grid" ? "single" : "grid";
-      if (next === "single" && !selectedCamera) {
-        const first = filteredLfCameras[0]?.id;
-        if (first) setSelectedCamera(first);
-      }
-      return next;
-    });
-  };
-  // --------------------------------
-
   const handleLogin = (user: any) => {
     setMe(user);
     setIsAuthenticated(true);
@@ -496,7 +518,6 @@ export default function App() {
     try {
       await api("/api/auth/logout", { method: "POST" });
     } catch {
-      // ignore logout errors
     }
 
     setToken("");
@@ -505,7 +526,6 @@ export default function App() {
     setCurrentPage("dashboard");
   };
 
-  // Show login page if not authenticated
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;
   }
@@ -513,78 +533,68 @@ export default function App() {
   const handleRecordingToggle = (cameraId: string) => {
     setCameras((prev) =>
       prev.map((cam) =>
-        cam.id === cameraId
-          ? { ...cam, recording: !cam.recording }
-          : cam,
-      ),
-    );
-  };
-
-  const handleLfStatusChange = (
-    cameraId: string,
-    status: Camera["status"]
-  ) => {
-    setLfCameras((prev) =>
-      prev.map((cam) =>
-        cam.id === cameraId ? { ...cam, status } : cam
+        cam.id === cameraId ? { ...cam, recording: !cam.recording } : cam
       )
     );
   };
 
- const handleDismissAlert = async (alertId: string) => {
-  // optimistic UI remove first
-  setAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
-  setLfAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
-
-  try {
-    const r = await fetch(
-      `${LOSTFOUND_API_BASE}/api/lostfound/alerts/${encodeURIComponent(alertId)}/dismiss`,
-      {
-        method: "POST",
-        cache: "no-store",
-      }
+  const handleLfStatusChange = (cameraId: string, status: Camera["status"]) => {
+    setLfCameras((prev) =>
+      prev.map((cam) => (cam.id === cameraId ? { ...cam, status } : cam))
     );
+  };
 
-    if (!r.ok) {
-      throw new Error(`Dismiss failed: ${r.status}`);
-    }
-  } catch (err) {
-    console.error("Failed to dismiss lost & found alert:", err);
+  const handleDismissAlert = async (alertId: string) => {
+    setAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
+    setLfAlerts((prev) => prev.filter((alert) => alert.id !== alertId));
 
-    // reload from backend if dismiss failed
     try {
-      const alertsRes = await fetch(
-        `${LOSTFOUND_API_BASE}/api/lostfound/alerts?limit=50`,
-        { cache: "no-store" }
+      const r = await fetch(
+        `${LOSTFOUND_API_BASE}/api/lostfound/alerts/${encodeURIComponent(
+          alertId
+        )}/dismiss`,
+        {
+          method: "POST",
+          cache: "no-store",
+        }
       );
-      const alertsJson = await alertsRes.json().catch(() => ({}));
 
-      const backendAlerts = Array.isArray(alertsJson)
-        ? alertsJson
-        : Array.isArray(alertsJson?.alerts)
-        ? alertsJson.alerts
-        : [];
+      if (!r.ok) {
+        throw new Error(`Dismiss failed: ${r.status}`);
+      }
+    } catch (err) {
+      console.error("Failed to dismiss lost & found alert:", err);
 
-      setLfAlerts(
-        backendAlerts.map((a: any) => ({
-          id: String(a.id ?? ""),
-          cameraId: String(a.cameraId ?? ""),
-          cameraName: String(a.cameraName ?? a.cameraId ?? "Unknown"),
-          type: "lost-found",
-          timestamp: new Date(Number(a.timestamp ?? 0) * 1000),
-          severity: (a.severity ?? "medium") as "low" | "medium" | "high",
-          message: String(a.message ?? ""),
-          imageUrl: toAbsLostFound(a.imageUrl || a.thumbUrl),
-        }))
-      );
-    } catch {}
-  }
-};
+      try {
+        const alertsRes = await fetch(
+          `${LOSTFOUND_API_BASE}/api/lostfound/alerts?limit=50`,
+          { cache: "no-store" }
+        );
+        const alertsJson = await alertsRes.json().catch(() => ({}));
 
+        const backendAlerts = Array.isArray(alertsJson)
+          ? alertsJson
+          : Array.isArray(alertsJson?.alerts)
+          ? alertsJson.alerts
+          : [];
 
-  // Get current alerts based on monitoring mode
+        setLfAlerts(
+          backendAlerts.map((a: any) => ({
+            id: String(a.id ?? ""),
+            cameraId: String(a.cameraId ?? ""),
+            cameraName: String(a.cameraName ?? a.cameraId ?? "Unknown"),
+            type: "lost-found" as const,
+            timestamp: new Date(Number(a.timestamp ?? 0) * 1000),
+            severity: (a.severity ?? "medium") as "low" | "medium" | "high",
+            message: String(a.message ?? ""),
+            imageUrl: toAbsLostFound(a.imageUrl || a.thumbUrl),
+          }))
+        );
+      } catch {}
+    }
+  };
+
   const getCurrentAlerts = () => {
-    // If don't have a alerts yet, keep it empty for dashboard/live pages.
     if (
       currentPage === "dashboard" ||
       currentPage === "live-attire" ||
@@ -598,14 +608,13 @@ export default function App() {
 
   const currentAlerts = getCurrentAlerts();
 
-  // which module is currently relevant for the header?
   const activeModule: "lost-found" | "attire" =
     currentPage === "live-attire"
       ? "attire"
       : currentPage === "live-lostfound"
       ? "lost-found"
       : monitoringMode;
-      
+
   const totalSources =
     activeModule === "attire" ? attireTotalSources : lfCameras.length;
 
@@ -656,21 +665,11 @@ export default function App() {
                   className={`flex flex-col ${
                     isGridFullscreen
                       ? "h-screen w-screen overflow-hidden bg-slate-950"
-                      : "h-full min-h-screen space-y-4"
+                      : "h-full min-h-screen"
                   }`}
                 >
-                  <ControlBar
-                    viewMode={viewMode}
-                    onToggleView={toggleViewMode}
-                    onFullscreen={handleGridFullscreen}
-                    searchTerm={searchTerm}
-                    onSearchChange={setSearchTerm}
-                    onOpenFilters={() => setFiltersOpen(true)}
-                    onExport={() => {}}
-                  />
-
                   <LostFoundDashboard
-                    cameras={filteredLfCameras}
+                    cameras={lfCameras}
                     alerts={lfAlerts}
                     selectedCamera={selectedCamera}
                     onSelectCamera={setSelectedCamera}
@@ -678,6 +677,7 @@ export default function App() {
                     onDismissAlert={handleDismissAlert}
                     onStatusChange={handleLfStatusChange}
                     isFullscreen={isGridFullscreen}
+                    onToggleFullscreen={handleGridFullscreen}
                   />
                 </div>
               ) : (
@@ -721,7 +721,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex">
-      {/* Sidebar Navigation */}
       <Sidebar
         currentPage={currentPage}
         onPageChange={(page: AppPage) => {
@@ -740,19 +739,15 @@ export default function App() {
         }}
         onLogout={handleLogout}
         currentUser={me ? { name: me.name ?? "User", role: me.role ?? "" } : undefined}
-        role={role}   // pass down (you'll add this prop)
+        role={role}
       />
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
         <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm">
           <div className="px-6 py-4">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-white">
-                  CCTV Monitoring System
-                </h1>
+                <h1 className="text-white">CCTV Monitoring System</h1>
                 <p className="text-slate-400 mt-1">
                   Real-time security surveillance
                 </p>
@@ -776,7 +771,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Monitoring Mode Tabs - Only show on dashboard */}
             {currentPage === "dashboard" && (
               <div className="mt-4 flex items-center gap-2 bg-slate-800/30 p-1 rounded-lg w-fit">
                 <button
@@ -803,7 +797,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Status Bar */}
             <div className="mt-4 grid grid-cols-3 gap-4">
               <div className="bg-slate-800/50 rounded-lg px-4 py-3 border border-slate-700">
                 <div className="flex items-center justify-between">
@@ -815,34 +808,23 @@ export default function App() {
               </div>
               <div className="bg-slate-800/50 rounded-lg px-4 py-3 border border-slate-700">
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">
-                    Warnings
-                  </span>
-                  <span className="text-yellow-400">
-                    {warnings}
-                  </span>
+                  <span className="text-slate-400">Warnings</span>
+                  <span className="text-yellow-400">{warnings}</span>
                 </div>
               </div>
               <div className="bg-slate-800/50 rounded-lg px-4 py-3 border border-slate-700">
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">
-                    Offline
-                  </span>
-                  <span className="text-red-400">
-                    {offline}
-                  </span>
+                  <span className="text-slate-400">Offline</span>
+                  <span className="text-red-400">{offline}</span>
                 </div>
               </div>
             </div>
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden min-w-0">
-          {renderPage()}
-        </div>
+        <div className="flex flex-1 overflow-hidden min-w-0">{renderPage()}</div>
       </div>
 
-      {/* Toast overlay */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] space-y-3 w-[22rem]">
         {attireToasts.map((t) => (
           <div
@@ -852,7 +834,7 @@ export default function App() {
             onClick={() => {
               setCurrentPage("events");
               localStorage.setItem("nav:lastPage", "events");
-              setAttireToasts((prev) => prev.filter((x) => x.id !== t.id)); // optional: auto close
+              setAttireToasts((prev) => prev.filter((x) => x.id !== t.id));
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -864,14 +846,18 @@ export default function App() {
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-white text-sm font-semibold truncate">{t.title}</div>
-                <div className="text-slate-300 text-xs mt-1 truncate">{t.message}</div>
+                <div className="text-white text-sm font-semibold truncate">
+                  {t.title}
+                </div>
+                <div className="text-slate-300 text-xs mt-1 truncate">
+                  {t.message}
+                </div>
               </div>
 
               <button
                 className="text-slate-400 hover:text-white shrink-0"
                 onClick={(e) => {
-                  e.stopPropagation(); // don't navigate
+                  e.stopPropagation();
                   setAttireToasts((prev) => prev.filter((x) => x.id !== t.id));
                 }}
               >
