@@ -2,7 +2,7 @@ import type { Camera, Alert } from "../App";
 import { CameraFeed } from "./CameraFeedLF";
 import { useEffect, useMemo, useState } from "react";
 import { resolveLostFoundUrl } from "../api/base";
-import { Search, Filter, Maximize2, X } from "lucide-react";
+import { Search, Filter, Maximize2 } from "lucide-react";
 
 interface Props {
   cameras?: Camera[];
@@ -67,9 +67,7 @@ function AlertCard({
               src={resolvedImageUrl}
               alt="evidence"
               className="w-full h-full object-cover"
-              onError={() => {
-                setImgError(true);
-              }}
+              onError={() => setImgError(true)}
             />
           ) : (
             <div className="text-[11px] text-slate-500 px-2 text-center">
@@ -106,9 +104,7 @@ function AlertCard({
 
           <div className="mt-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs">
-              <span
-                className={`h-2 w-2 rounded-full ${sevDot(alert.severity)}`}
-              />
+              <span className={`h-2 w-2 rounded-full ${sevDot(alert.severity)}`} />
               <span className="text-slate-300 capitalize">
                 {alert.severity} priority
               </span>
@@ -151,7 +147,7 @@ function AlertsPanel({
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dismissedKeys));
     } catch {
-      // ignore
+      //
     }
   }, [dismissedKeys]);
 
@@ -179,7 +175,6 @@ function AlertsPanel({
       if (prev.includes(uiKey)) return prev;
       return [...prev, uiKey];
     });
-
     onDismiss?.(rawId);
   };
 
@@ -204,12 +199,6 @@ function AlertsPanel({
               onOpenEvents={onOpenEvents}
             />
           ))
-        )}
-
-        {visibleAlerts.length > 5 && (
-          <div className="text-xs text-slate-500 pt-1">
-            Showing latest 5 only.
-          </div>
         )}
       </div>
     </div>
@@ -239,21 +228,18 @@ export function LostFoundDashboard({
 
   const filteredCameras = useMemo(() => {
     return cameras.filter((cam) => {
-      const name = (cam.name || "").toLowerCase();
-      const location = (cam.location || "").toLowerCase();
-      const id = (cam.id || "").toLowerCase();
       const keyword = searchTerm.trim().toLowerCase();
+      const camType = getCameraType(cam);
 
       const matchesSearch =
         keyword === "" ||
-        name.includes(keyword) ||
-        location.includes(keyword) ||
-        id.includes(keyword);
+        cam.name.toLowerCase().includes(keyword) ||
+        cam.location.toLowerCase().includes(keyword) ||
+        cam.id.toLowerCase().includes(keyword);
 
       const matchesStatus =
         statusFilter === "all" ? true : cam.status === statusFilter;
 
-      const camType = getCameraType(cam);
       const matchesType =
         typeFilter === "all"
           ? true
@@ -332,9 +318,7 @@ export function LostFoundDashboard({
                 <select
                   value={typeFilter}
                   onChange={(e) =>
-                    setTypeFilter(
-                      e.target.value as "all" | "normal" | "fisheye"
-                    )
+                    setTypeFilter(e.target.value as "all" | "normal" | "fisheye")
                   }
                   className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white outline-none"
                 >
@@ -366,8 +350,8 @@ export function LostFoundDashboard({
       )}
 
       <div className="mt-6">
-        <div className="grid grid-cols-[1fr,380px] gap-4">
-          <div className="grid gap-4 grid-cols-3 auto-rows-[260px]">
+        {isFullscreen ? (
+          <div className="grid gap-4 grid-cols-4 auto-rows-[minmax(280px,1fr)]">
             {filteredCameras.map((cam) => (
               <CameraFeed
                 key={cam.id}
@@ -376,25 +360,49 @@ export function LostFoundDashboard({
                 onSelect={() => onSelectCamera(cam.id)}
                 onRecordingToggle={() => onRecordingToggle(cam.id)}
                 onStatusChange={onStatusChange}
-                isFullscreen={isFullscreen}
-                gridContain={!isFullscreen}
+                isFullscreen={true}
+                gridContain={true}
                 cycleSeconds={30}
               />
             ))}
 
             {filteredCameras.length === 0 && (
-              <div className="text-slate-400 text-center py-12 col-span-3 border border-slate-800 rounded-2xl bg-slate-900/30">
+              <div className="text-slate-400 text-center py-12 col-span-4 border border-slate-800 rounded-2xl bg-slate-900/30">
                 No cameras match the current filter.
               </div>
             )}
           </div>
+        ) : (
+          <div className="grid grid-cols-[1fr,380px] gap-4">
+            <div className="grid gap-4 grid-cols-3 auto-rows-[260px]">
+              {filteredCameras.map((cam) => (
+                <CameraFeed
+                  key={cam.id}
+                  camera={cam}
+                  isSelected={selectedCamera === cam.id}
+                  onSelect={() => onSelectCamera(cam.id)}
+                  onRecordingToggle={() => onRecordingToggle(cam.id)}
+                  onStatusChange={onStatusChange}
+                  isFullscreen={false}
+                  gridContain={true}
+                  cycleSeconds={30}
+                />
+              ))}
 
-          <AlertsPanel
-            alerts={alerts}
-            onDismiss={onDismissAlert}
-            onOpenEvents={onOpenEvents}
-          />
-        </div>
+              {filteredCameras.length === 0 && (
+                <div className="text-slate-400 text-center py-12 col-span-3 border border-slate-800 rounded-2xl bg-slate-900/30">
+                  No cameras match the current filter.
+                </div>
+              )}
+            </div>
+
+            <AlertsPanel
+              alerts={alerts}
+              onDismiss={onDismissAlert}
+              onOpenEvents={onOpenEvents}
+            />
+          </div>
+        )}
       </div>
     </>
   );
