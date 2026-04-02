@@ -2328,7 +2328,7 @@ export default function LostAndFoundSettingsPage({
           </>
         )}
 
-        {tab === "roi" && isFisheye && (
+        {/* {tab === "roi" && isFisheye && (
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
             <div className={`rounded-2xl border ${BORDER} p-3 ${CARD_BG}`}>
               <div className={`text-sm font-semibold ${TEXT} mb-2`}>
@@ -2453,7 +2453,7 @@ export default function LostAndFoundSettingsPage({
               </div>
             </div>
           </div>
-        )}
+        )} */}
 
         {tab === "roi" && (
           <div
