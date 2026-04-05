@@ -93,26 +93,6 @@ function shallowEqualOverrides(
   return true;
 }
 
-function readStoredActiveCamIds(mode: "lost-found" | "attire"): string[] {
-  try {
-    const raw = localStorage.getItem(`live_active_cam_ids_v1_${mode}`);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((x) => normalizeCamId(String(x || ""))).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function readStoredActiveCustomized(mode: "lost-found" | "attire"): boolean {
-  try {
-    return localStorage.getItem(`live_active_cam_customized_v1_${mode}`) === "1";
-  } catch {
-    return false;
-  }
-}
-
 function toPctBox(det: LiveDet): { x: number; y: number; w: number; h: number } | null {
   if (
     typeof det?.x === "number" &&
@@ -853,30 +833,65 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
   const [activeCustomized, setActiveCustomized] = useState(false);
 
   const savingOverrideRef = useRef(false);
+  const savingActiveSequenceRef = useRef(false);
 
-  useEffect(() => {
-    const customized = readStoredActiveCustomized(mode);
-    const stored = customized ? readStoredActiveCamIds(mode) : [];
-
-    setActiveCustomized(customized);
-    setActiveCamIds(stored);
-    setActiveRestoreDone(true);
-  }, [mode]);
-
-  useEffect(() => {
-    if (!activeRestoreDone) return;
-    if (!activeCustomized) return;
+  const loadActiveSequence = async () => {
+    if (!API_BASE) return;
 
     try {
-      localStorage.setItem(
-        `live_active_cam_ids_v1_${mode}`,
-        JSON.stringify(activeCamIds.map((id) => normalizeCamId(id)))
+      const r = await fetch(
+        `${API_BASE}/api/live/active-sequence?mode=${encodeURIComponent(mode)}`,
+        { cache: "no-store" }
       );
-      localStorage.setItem(`live_active_cam_customized_v1_${mode}`, "1");
-    } catch {
-      // ignore
+
+      if (!r.ok) throw new Error(`active-sequence HTTP ${r.status}`);
+
+      const j = await r.json();
+      const arr = Array.isArray(j?.active_cam_ids) ? j.active_cam_ids : [];
+      const cleaned = arr
+        .map((x: any) => normalizeCamId(String(x || "")))
+        .filter(Boolean)
+        .slice(0, MAX_ACTIVE_LIVE_STREAMS);
+
+      setActiveCamIds(cleaned);
+      setActiveCustomized(cleaned.length > 0);
+      setActiveRestoreDone(true);
+    } catch (e) {
+      console.warn("Failed to load active sequence:", e);
+      setActiveCamIds([]);
+      setActiveCustomized(false);
+      setActiveRestoreDone(true);
     }
-  }, [activeCamIds, mode, activeRestoreDone, activeCustomized]);
+  };
+
+  const saveActiveSequence = async (nextIds: string[]) => {
+    if (!API_BASE) return false;
+
+    try {
+      savingActiveSequenceRef.current = true;
+
+      const r = await fetch(`${API_BASE}/api/live/active-sequence`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          active_cam_ids: nextIds
+            .map((id) => normalizeCamId(id))
+            .filter(Boolean)
+            .slice(0, MAX_ACTIVE_LIVE_STREAMS),
+        }),
+      });
+
+      return r.ok;
+    } catch (e) {
+      console.warn("Failed to save active sequence:", e);
+      return false;
+    } finally {
+      window.setTimeout(() => {
+        savingActiveSequenceRef.current = false;
+      }, 500);
+    }
+  };
 
   const loadViewModeOverrides = async () => {
     if (!API_BASE) return;
@@ -991,6 +1006,11 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
     if (!API_BASE) return;
     loadViewModeOverrides();
   }, [API_BASE]);
+
+  useEffect(() => {
+    if (!API_BASE) return;
+    loadActiveSequence();
+  }, [API_BASE, mode]);
 
   useEffect(() => {
     if (!API_BASE) return;
@@ -1190,32 +1210,30 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
     [activeCamIds]
   );
 
-  const toggleActiveCamera = (camId: string) => {
+  const toggleActiveCamera = async (camId: string) => {
     const key = normalizeCamId(camId);
+    const normalizedPrev = activeCamIds.map((id) => normalizeCamId(id));
+    const exists = normalizedPrev.includes(key);
 
-    setActiveCustomized(true);
+    let nextIds: string[];
 
-    try {
-      localStorage.setItem(`live_active_cam_customized_v1_${mode}`, "1");
-    } catch {
-      // ignore
-    }
-
-    setActiveCamIds((prev) => {
-      const normalizedPrev = prev.map((id) => normalizeCamId(id));
-      const exists = normalizedPrev.includes(key);
-
-      if (exists) {
-        return normalizedPrev.filter((id) => id !== key);
-      }
-
+    if (exists) {
+      nextIds = normalizedPrev.filter((id) => id !== key);
+    } else {
       if (normalizedPrev.length >= MAX_ACTIVE_LIVE_STREAMS) {
         alert(`Max ${MAX_ACTIVE_LIVE_STREAMS} active live streams at one time.`);
-        return normalizedPrev;
+        return;
       }
+      nextIds = [...normalizedPrev, key];
+    }
 
-      return [...normalizedPrev, key];
-    });
+    setActiveCamIds(nextIds);
+    setActiveCustomized(true);
+
+    const ok = await saveActiveSequence(nextIds);
+    if (!ok) {
+      alert("Failed to save active live sequence.");
+    }
   };
 
   const toggleOverride = async (camId: string) => {
@@ -1270,14 +1288,40 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
   };
 
   const rows = useMemo<CamRow[]>(() => {
-    return camsBase.map(({ camId, meta, cam }) => ({
+    const baseRows = camsBase.map(({ camId, meta, cam }) => ({
       camId,
       meta,
       cam,
       fish: isFisheye(camId, meta),
       isActiveStream: activeLiveSet.has(normalizeCamId(camId)),
     }));
-  }, [camsBase, activeLiveSet, fisheyeOverride]);
+
+    const activeOrderMap = new Map(
+      activeCamIds.map((id, idx) => [normalizeCamId(id), idx])
+    );
+
+    return [...baseRows].sort((a, b) => {
+      const aKey = normalizeCamId(a.camId);
+      const bKey = normalizeCamId(b.camId);
+
+      const aActive = a.isActiveStream;
+      const bActive = b.isActiveStream;
+
+      if (aActive && bActive) {
+        return (activeOrderMap.get(aKey) ?? 9999) - (activeOrderMap.get(bKey) ?? 9999);
+      }
+
+      if (aActive !== bActive) {
+        return aActive ? -1 : 1;
+      }
+
+      if (a.fish !== b.fish) {
+        return a.fish ? -1 : 1;
+      }
+
+      return String(a.meta?.name || a.camId).localeCompare(String(b.meta?.name || b.camId));
+    });
+  }, [camsBase, activeLiveSet, fisheyeOverride, activeCamIds]);
 
   const activeFish = useMemo(() => rows.filter((r) => r.isActiveStream && r.fish), [rows]);
   const activeNormal = useMemo(() => rows.filter((r) => r.isActiveStream && !r.fish), [rows]);
