@@ -104,6 +104,28 @@ function downloadBlob(filename: string, data: Blob) {
   URL.revokeObjectURL(url);
 }
 
+async function waitForImagesToLoad(container: HTMLElement) {
+  const images = Array.from(container.querySelectorAll("img"));
+
+  await Promise.all(
+    images.map((img) => {
+      return new Promise<void>((resolve) => {
+        if (img.complete && img.naturalWidth > 0) {
+          resolve();
+          return;
+        }
+
+        const done = () => resolve();
+
+        img.addEventListener("load", done, { once: true });
+        img.addEventListener("error", done, { once: true });
+
+        setTimeout(() => resolve(), 5000);
+      });
+    })
+  );
+}
+
 /* ================= TOOLTIP ================= */
 
 function NiceTooltip({ active, payload, label }: any) {
@@ -135,27 +157,6 @@ function PdfTooltip({ active, payload, label }: any) {
 }
 
 /* ================= SMALL UI COMPONENTS ================= */
-async function waitForImagesToLoad(container: HTMLElement) {
-  const images = Array.from(container.querySelectorAll("img"));
-
-  await Promise.all(
-    images.map((img) => {
-      return new Promise<void>((resolve) => {
-        if (img.complete && img.naturalWidth > 0) {
-          resolve();
-          return;
-        }
-
-        const done = () => resolve();
-
-        img.addEventListener("load", done, { once: true });
-        img.addEventListener("error", done, { once: true });
-
-        setTimeout(() => resolve(), 5000);
-      });
-    })
-  );
-}
 
 function StatCard({
   title,
@@ -170,8 +171,8 @@ function StatCard({
     tone === "red"
       ? "text-red-400"
       : tone === "green"
-      ? "text-emerald-400"
-      : "text-white";
+        ? "text-emerald-400"
+        : "text-white";
 
   return (
     <div className="bg-white/5 ring-1 ring-white/10 rounded-2xl p-6">
@@ -220,13 +221,13 @@ function PdfStatCard({
     tone === "red"
       ? "text-red-600"
       : tone === "green"
-      ? "text-emerald-600"
-      : "text-slate-900";
+        ? "text-emerald-600"
+        : "text-slate-900";
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
-      <div className="text-base text-slate-500">{title}</div>
-      <div className={`mt-2 text-4xl font-bold ${vCls}`}>{value}</div>
+      <div className="text-lg text-slate-500">{title}</div>
+      <div className={`mt-2 text-5xl font-bold ${vCls}`}>{value}</div>
     </div>
   );
 }
@@ -243,8 +244,8 @@ function PdfChartCard({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
       <div className="mb-4 flex items-center justify-between">
-        <div className="font-semibold text-slate-900 text-xl">{title}</div>
-        <div className="text-sm text-slate-500">Auto-generated</div>
+        <div className="font-semibold text-slate-900 text-2xl">{title}</div>
+        <div className="text-base text-slate-500">Auto-generated</div>
       </div>
 
       <div className="rounded-xl border border-slate-100 bg-white p-2" style={{ height }}>
@@ -268,7 +269,6 @@ function LostAndFoundReportsPageInner() {
 
   const chartsRef = useRef<HTMLDivElement | null>(null);
 
-  // Hidden export layouts
   const pngChartsRef = useRef<HTMLDivElement | null>(null);
   const pdfPage1Ref = useRef<HTMLDivElement | null>(null);
   const pdfChartsRef = useRef<HTMLDivElement | null>(null);
@@ -319,7 +319,7 @@ function LostAndFoundReportsPageInner() {
 
       setItems(safe);
     } catch {
-      // ignore
+      // ignore abort/fetch issues
     } finally {
       setLoading(false);
     }
@@ -419,8 +419,6 @@ function LostAndFoundReportsPageInner() {
     return filtered.filter((it) => !!it.imageUrl).slice(0, 6);
   }, [filtered]);
 
-  /* ================= CSV ================= */
-
   function exportCSV() {
     const generatedAt = new Date().toLocaleString();
 
@@ -504,8 +502,6 @@ function LostAndFoundReportsPageInner() {
     downloadBlob(`lost_found_summary_${getNowFilenamePart()}.csv`, blob);
   }
 
-  /* ================= PNG ================= */
-
   async function exportPNGCharts() {
     if (!pngChartsRef.current) return;
 
@@ -523,18 +519,16 @@ function LostAndFoundReportsPageInner() {
     }, "image/png");
   }
 
-  /* ================= PDF ================= */
-
   async function exportPDFReport() {
     if (!pdfPage1Ref.current || !pdfChartsRef.current) return;
 
     const pdf = new jsPDF("p", "mm", "a4");
 
+    // Page 1 summary
     const pW = pdf.internal.pageSize.getWidth();
     const pH = pdf.internal.pageSize.getHeight();
     const margin = 8;
 
-    // -------- Page 1 summary (portrait)
     const coverCanvas = await html2canvas(pdfPage1Ref.current, {
       scale: 2,
       backgroundColor: "#ffffff",
@@ -548,7 +542,7 @@ function LostAndFoundReportsPageInner() {
     const coverH = (coverCanvas.height * coverW) / coverCanvas.width;
     pdf.addImage(coverImg, "PNG", margin, 8, coverW, Math.min(coverH, pH - 16));
 
-    // -------- Page 2 charts (landscape)
+    // Page 2 charts - landscape
     const chartsCanvas = await html2canvas(pdfChartsRef.current, {
       scale: 2,
       backgroundColor: "#ffffff",
@@ -576,7 +570,7 @@ function LostAndFoundReportsPageInner() {
       Math.min(chartsLandscapeH, cH - 16)
     );
 
-    // -------- Detailed table (landscape)
+    // Detailed table - landscape
     pdf.addPage("a4", "l");
 
     let tablePage = 3;
@@ -661,18 +655,17 @@ function LostAndFoundReportsPageInner() {
 
     drawLandscapeFooter(tablePage);
 
-    // -------- Evidence page (portrait, html2canvas capture)
+    // Evidence page
     if (latestEvidenceItems.length > 0 && pdfEvidenceRef.current) {
       await waitForImagesToLoad(pdfEvidenceRef.current);
-
-      // small extra delay so browser paints the loaded images
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
       const evidenceCanvas = await html2canvas(pdfEvidenceRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
         allowTaint: false,
+        imageTimeout: 15000,
         windowWidth: pdfEvidenceRef.current.scrollWidth,
         windowHeight: pdfEvidenceRef.current.scrollHeight,
       });
@@ -703,7 +696,6 @@ function LostAndFoundReportsPageInner() {
 
   return (
     <div className="w-full h-full bg-[#0b1220] text-slate-100">
-      {/* ======================= VISIBLE DASHBOARD ======================= */}
       <div className="w-full px-6 py-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-8">
           <div>
@@ -938,7 +930,7 @@ function LostAndFoundReportsPageInner() {
         </div>
       </div>
 
-      {/* ======================= HIDDEN PNG EXPORT LAYOUT ======================= */}
+      {/* Hidden PNG export layout */}
       <div className="fixed -left-[99999px] top-0 pointer-events-none" aria-hidden="true">
         <div
           ref={pngChartsRef}
@@ -1013,7 +1005,7 @@ function LostAndFoundReportsPageInner() {
         </div>
       </div>
 
-      {/* ======================= HIDDEN PDF PAGE 1 ======================= */}
+      {/* Hidden PDF summary page */}
       <div className="fixed -left-[99999px] top-0 pointer-events-none" aria-hidden="true">
         <div
           ref={pdfPage1Ref}
@@ -1021,26 +1013,26 @@ function LostAndFoundReportsPageInner() {
           style={{ fontFamily: "Arial, sans-serif" }}
         >
           <div className="rounded-3xl bg-slate-900 text-white px-8 py-8 mb-8">
-            <div className="text-sm font-semibold tracking-[0.25em] uppercase text-sky-300">
+            <div className="text-base font-semibold tracking-[0.25em] uppercase text-sky-300">
               SecureWatch Pro v2.0
             </div>
-            <div className="text-4xl font-bold mt-3">Lost &amp; Found Analytical Report</div>
-            <div className="text-sm text-slate-300 mt-3">
+            <div className="text-5xl font-bold mt-3">Lost &amp; Found Analytical Report</div>
+            <div className="text-lg text-slate-300 mt-3">
               Generated on {new Date().toLocaleString()}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-5 mb-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <div className="text-sm font-semibold text-slate-700 mb-3">Applied Filters</div>
-              <div className="text-sm text-slate-600">Search: {q || "-"}</div>
-              <div className="text-sm text-slate-600 mt-1">Status: {statusFilter}</div>
-              <div className="text-sm text-slate-600 mt-1">Source: {sourceFilter}</div>
+              <div className="text-lg font-semibold text-slate-700 mb-3">Applied Filters</div>
+              <div className="text-base text-slate-600">Search: {q || "-"}</div>
+              <div className="text-base text-slate-600 mt-1">Status: {statusFilter}</div>
+              <div className="text-base text-slate-600 mt-1">Source: {sourceFilter}</div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <div className="text-sm font-semibold text-slate-700 mb-3">Executive Summary</div>
-              <div className="text-sm leading-6 text-slate-600">
+              <div className="text-lg font-semibold text-slate-700 mb-3">Executive Summary</div>
+              <div className="text-base leading-7 text-slate-600">
                 This report summarizes Lost &amp; Found records captured by the SecureWatch
                 module. It includes key performance indicators, analytical charts, hotspot
                 locations, item distribution trends, and a detailed event listing for audit
@@ -1090,7 +1082,7 @@ function LostAndFoundReportsPageInner() {
         </div>
       </div>
 
-      {/* ======================= HIDDEN PDF PAGE 2 ======================= */}
+      {/* Hidden PDF charts page */}
       <div className="fixed -left-[99999px] top-0 pointer-events-none" aria-hidden="true">
         <div
           ref={pdfChartsRef}
@@ -1098,11 +1090,11 @@ function LostAndFoundReportsPageInner() {
           style={{ fontFamily: "Arial, sans-serif" }}
         >
           <div className="mb-8">
-            <div className="text-base font-semibold tracking-[0.2em] uppercase text-sky-700">
+            <div className="text-lg font-semibold tracking-[0.2em] uppercase text-sky-700">
               SecureWatch Pro v2.0
             </div>
-            <div className="text-4xl font-bold mt-2">Analytical Charts</div>
-            <div className="text-lg text-slate-500 mt-2">
+            <div className="text-5xl font-bold mt-2">Analytical Charts</div>
+            <div className="text-xl text-slate-500 mt-2">
               Lost &amp; Found trends and distribution overview
             </div>
           </div>
@@ -1112,8 +1104,8 @@ function LostAndFoundReportsPageInner() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={itemDistribution} margin={{ top: 10, right: 18, left: 0, bottom: 25 }}>
                   <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                  <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 14 }} interval={0} />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 14 }} />
+                  <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 16 }} interval={0} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 16 }} />
                   <Tooltip content={<PdfTooltip />} />
                   <Bar dataKey="count" name="Count" fill="#2563eb" radius={[8, 8, 0, 0]} />
                 </BarChart>
@@ -1127,11 +1119,11 @@ function LostAndFoundReportsPageInner() {
                   <XAxis
                     dataKey="name"
                     stroke="#64748b"
-                    tick={{ fontSize: 14 }}
+                    tick={{ fontSize: 16 }}
                     interval={0}
                     tickFormatter={(v) => formatLocationLabel(String(v))}
                   />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 14 }} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 16 }} />
                   <Tooltip content={<PdfTooltip />} />
                   <Bar dataKey="count" name="Count" fill="#059669" radius={[8, 8, 0, 0]} />
                 </BarChart>
@@ -1143,8 +1135,8 @@ function LostAndFoundReportsPageInner() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dailyTrend} margin={{ top: 10, right: 18, left: 0, bottom: 25 }}>
                 <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                <XAxis dataKey="day" stroke="#64748b" tick={{ fontSize: 14 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 14 }} />
+                <XAxis dataKey="day" stroke="#64748b" tick={{ fontSize: 16 }} />
+                <YAxis stroke="#64748b" tick={{ fontSize: 16 }} />
                 <Tooltip content={<PdfTooltip />} />
                 <Line
                   type="monotone"
@@ -1161,7 +1153,7 @@ function LostAndFoundReportsPageInner() {
         </div>
       </div>
 
-      {/* ======================= HIDDEN PDF EVIDENCE PAGE ======================= */}
+      {/* Hidden PDF evidence page */}
       <div className="fixed -left-[99999px] top-0 pointer-events-none" aria-hidden="true">
         <div
           ref={pdfEvidenceRef}
@@ -1169,11 +1161,11 @@ function LostAndFoundReportsPageInner() {
           style={{ fontFamily: "Arial, sans-serif" }}
         >
           <div className="mb-8">
-            <div className="text-sm font-semibold tracking-[0.2em] uppercase text-sky-700">
+            <div className="text-base font-semibold tracking-[0.2em] uppercase text-sky-700">
               SecureWatch Pro v2.0
             </div>
-            <div className="text-3xl font-bold mt-2">Latest Evidence Snapshots</div>
-            <div className="text-base text-slate-500 mt-2">
+            <div className="text-4xl font-bold mt-2">Latest Evidence Snapshots</div>
+            <div className="text-lg text-slate-500 mt-2">
               Recent item images for quick review
             </div>
           </div>
@@ -1190,6 +1182,8 @@ function LostAndFoundReportsPageInner() {
                       src={it.imageUrl}
                       alt={it.label || "Evidence"}
                       className="w-full h-full object-cover"
+                      crossOrigin="anonymous"
+                      referrerPolicy="no-referrer"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.style.display = "none";
