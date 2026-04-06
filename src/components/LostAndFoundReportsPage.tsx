@@ -135,7 +135,6 @@ function PdfTooltip({ active, payload, label }: any) {
 }
 
 /* ================= SMALL UI COMPONENTS ================= */
-
 async function waitForImagesToLoad(container: HTMLElement) {
   const images = Array.from(container.querySelectorAll("img"));
 
@@ -157,6 +156,7 @@ async function waitForImagesToLoad(container: HTMLElement) {
     })
   );
 }
+
 function StatCard({
   title,
   value,
@@ -225,8 +225,8 @@ function PdfStatCard({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
-      <div className="text-lg text-slate-500">{title}</div>
-      <div className={`mt-2 text-5xl font-bold ${vCls}`}>{value}</div>
+      <div className="text-base text-slate-500">{title}</div>
+      <div className={`mt-2 text-4xl font-bold ${vCls}`}>{value}</div>
     </div>
   );
 }
@@ -663,10 +663,17 @@ function LostAndFoundReportsPageInner() {
 
     // -------- Evidence page (portrait, html2canvas capture)
     if (latestEvidenceItems.length > 0 && pdfEvidenceRef.current) {
+      await waitForImagesToLoad(pdfEvidenceRef.current);
+
+      // small extra delay to let browser paint images
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
       const evidenceCanvas = await html2canvas(pdfEvidenceRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
+        allowTaint: false,
+        imageTimeout: 15000,
         windowWidth: pdfEvidenceRef.current.scrollWidth,
         windowHeight: pdfEvidenceRef.current.scrollHeight,
       });
@@ -1015,11 +1022,11 @@ function LostAndFoundReportsPageInner() {
           style={{ fontFamily: "Arial, sans-serif" }}
         >
           <div className="rounded-3xl bg-slate-900 text-white px-8 py-8 mb-8">
-           <div className="text-base font-semibold tracking-[0.25em] uppercase text-sky-300">
+            <div className="text-sm font-semibold tracking-[0.25em] uppercase text-sky-300">
               SecureWatch Pro v2.0
             </div>
-            <div className="text-5xl font-bold mt-3">Lost &amp; Found Analytical Report</div>
-            <div className="text-lg text-slate-300 mt-3">
+            <div className="text-4xl font-bold mt-3">Lost &amp; Found Analytical Report</div>
+            <div className="text-sm text-slate-300 mt-3">
               Generated on {new Date().toLocaleString()}
             </div>
           </div>
@@ -1185,14 +1192,14 @@ function LostAndFoundReportsPageInner() {
                       alt={it.label || "Evidence"}
                       className="w-full h-full object-cover"
                       crossOrigin="anonymous"
+                      referrerPolicy="no-referrer"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.style.display = "none";
                         const parent = target.parentElement;
                         if (parent && !parent.querySelector(".evidence-fallback")) {
                           const fallback = document.createElement("div");
-                          fallback.className =
-                            "evidence-fallback text-slate-400 text-base";
+                          fallback.className = "evidence-fallback text-slate-400 text-lg";
                           fallback.textContent = "Image unavailable";
                           parent.appendChild(fallback);
                         }
