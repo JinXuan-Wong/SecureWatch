@@ -46,6 +46,12 @@ interface TimeSchedule {
 }
 
 const API_BASE = ATTIRE_API_BASE;
+const MAX_RETENTION_DAYS = 150;
+
+function clampRetentionDays(v: number) {
+  if (!Number.isFinite(v)) return 1;
+  return Math.max(1, Math.min(MAX_RETENTION_DAYS, Math.round(v)));
+}
 
 type ViolationKey = "sleeveless" | "shorts" | "slippers";
 
@@ -695,16 +701,21 @@ export function AttireComplianceSettingsPage() {
 
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         const cfg = await fetchRetentionConfig();
         if (!alive) return;
+
         setRetentionEnabled(Boolean(cfg?.enabled ?? true));
-        setRetentionDays(Number(cfg?.retention_days ?? 7));
+        setRetentionDays(
+          clampRetentionDays(Number(cfg?.retention_days ?? 7))
+        );
       } catch {
         // keep defaults
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -1038,7 +1049,10 @@ export function AttireComplianceSettingsPage() {
   const handleSaveRetentionSettings = async () => {
     setRetentionSaving(true);
     try {
-      const data = await saveRetentionConfig(retentionEnabled, retentionDays);
+      const safeDays = clampRetentionDays(retentionDays);
+      setRetentionDays(safeDays);
+
+      const data = await saveRetentionConfig(retentionEnabled, safeDays);
 
       localStorage.setItem("attire:retentionVer", String(Date.now()));
       localStorage.setItem("attire:eventsVer", String(Date.now()));
@@ -2358,8 +2372,8 @@ export function AttireComplianceSettingsPage() {
                 </div>
 
                 {/* Retention days */}
-                <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 space-y-3">
-                  <div className="flex items-center justify-between">
+                <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
                       <div className="text-white text-sm font-medium">Violation Event Retention</div>
                       <div className="text-slate-400 text-xs">
@@ -2367,26 +2381,48 @@ export function AttireComplianceSettingsPage() {
                         will be removed automatically
                       </div>
                     </div>
-                    <div className="text-slate-200 text-sm font-medium">
-                      {retentionDays} day{retentionDays > 1 ? "s" : ""}
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="number"
+                        min={1}
+                        max={MAX_RETENTION_DAYS}
+                        step={1}
+                        value={retentionDays}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") {
+                            setRetentionDays(1);
+                            return;
+                          }
+                          setRetentionDays(clampRetentionDays(Number(raw)));
+                        }}
+                        className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm"
+                        disabled={!retentionEnabled || retentionSaving || clearingEvents}
+                      />
+                      <span className="text-slate-300 text-sm">day{retentionDays > 1 ? "s" : ""}</span>
                     </div>
                   </div>
 
                   <input
                     type="range"
                     min={1}
-                    max={7}
+                    max={MAX_RETENTION_DAYS}
                     step={1}
                     value={retentionDays}
-                    onChange={(e) => setRetentionDays(Number(e.target.value))}
+                    onChange={(e) => setRetentionDays(clampRetentionDays(Number(e.target.value)))}
                     className="w-full"
                     disabled={!retentionEnabled || retentionSaving || clearingEvents}
                   />
 
                   <div className="flex justify-between text-slate-500 text-xs">
                     <span>1 day</span>
-                    <span>7 days</span>
+                    <span>150 days</span>
                   </div>
+
+                  <p className="text-slate-400 text-xs">
+                    You can drag the slider or enter the value directly.
+                  </p>
                 </div>
 
                 {/* Warning */}
