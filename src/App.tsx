@@ -809,8 +809,14 @@ export default function App() {
                       setCurrentPage("events");
                       localStorage.setItem("nav:lastPage", "events");
 
-                      // optional: keep selected camera for later usage
-                      setSelectedCamera(alert.cameraId);
+                      // ⭐ IMPORTANT: tell Events page to show Lost & Found
+                      localStorage.setItem("events:module", "lost-found");
+
+                      // optional but recommended
+                      localStorage.setItem("events:selectedCameraId", alert.cameraId);
+                      localStorage.setItem("events:selectedAlertId", alert.id);
+
+                      window.dispatchEvent(new Event("nav:changed"));
                     }}
                     isFullscreen={isGridFullscreen}
                     onToggleFullscreen={handleGridFullscreen}
