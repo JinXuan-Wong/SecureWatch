@@ -663,10 +663,16 @@ function LostAndFoundReportsPageInner() {
 
     // -------- Evidence page (portrait, html2canvas capture)
     if (latestEvidenceItems.length > 0 && pdfEvidenceRef.current) {
+      await waitForImagesToLoad(pdfEvidenceRef.current);
+
+      // small extra delay so browser paints the loaded images
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
       const evidenceCanvas = await html2canvas(pdfEvidenceRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
+        allowTaint: false,
         windowWidth: pdfEvidenceRef.current.scrollWidth,
         windowHeight: pdfEvidenceRef.current.scrollHeight,
       });
@@ -1181,23 +1187,21 @@ function LostAndFoundReportsPageInner() {
                 <div className="h-[240px] bg-slate-100 flex items-center justify-center">
                   {it.imageUrl ? (
                     <img
-                    src={it.imageUrl}
-                    alt={it.label || "Evidence"}
-                    className="w-full h-full object-cover"
-                    crossOrigin="anonymous"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.style.display = "none";
-                      const parent = target.parentElement;
-                      if (parent && !parent.querySelector(".evidence-fallback")) {
-                        const fallback = document.createElement("div");
-                        fallback.className = "evidence-fallback text-slate-400 text-lg";
-                        fallback.textContent = "Image unavailable";
-                        parent.appendChild(fallback);
-                      }
-                    }}
-                  />
+                      src={it.imageUrl}
+                      alt={it.label || "Evidence"}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                        const parent = target.parentElement;
+                        if (parent && !parent.querySelector(".evidence-fallback")) {
+                          const fallback = document.createElement("div");
+                          fallback.className = "evidence-fallback text-slate-400 text-lg";
+                          fallback.textContent = "Image unavailable";
+                          parent.appendChild(fallback);
+                        }
+                      }}
+                    />
                   ) : (
                     <div className="text-slate-400 text-base">Image unavailable</div>
                   )}
