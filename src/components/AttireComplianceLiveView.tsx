@@ -27,6 +27,27 @@ interface Detection {
   violation?: Violation;
 }
 
+type ViewMode = "auto" | "normal" | "fisheye";
+
+async function fetchViewMode(videoId: string): Promise<ViewMode> {
+  const res = await fetch(`${API_BASE}/api/attire/view-mode/${videoId}`);
+  if (!res.ok) throw new Error("Failed to load view mode");
+  const data = await res.json();
+  const mode = String(data?.mode ?? "auto").toLowerCase();
+  return mode === "normal" || mode === "fisheye" ? mode : "auto";
+}
+
+async function saveViewMode(videoId: string, mode: ViewMode) {
+  const res = await fetch(`${API_BASE}/api/attire/view-mode/${videoId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
+  return data;
+}
+
 async function fetchRtspSourcesSafe(): Promise<RtspSource[]> {
   try {
     const res = await fetch(`${API_BASE}/api/rtsp/sources`);
@@ -102,24 +123,6 @@ async function fetchAttireFps(videoId: string): Promise<{ stream_fps: number; de
     stream_fps: Number(data?.stream_fps ?? 12),
     detect_fps: Number(data?.detect_fps ?? 2),
   };
-}
-
-async function disableSourceAndRefresh(id: string) {
-  await setSourceEnabled(id, false);
-  localStorage.setItem("attire:enabledSourcesVer", String(Date.now()));
-  window.dispatchEvent(new Event("attire:sourcesChanged"));
-}
-
-async function refreshConfiguredFps(videoIds: string[]) {
-  const results = await Promise.allSettled(
-    videoIds.map(async (id) => ({ id, fps: await fetchAttireFps(id) }))
-  );
-
-  const next: Record<string, { stream_fps: number; detect_fps: number }> = {};
-  for (const r of results) {
-    if (r.status === "fulfilled") next[r.value.id] = r.value.fps;
-  }
-  return next;
 }
 
 async function closeOffline(videoId: string) {
@@ -242,8 +245,10 @@ type TileProps = {
   streamReload: Record<string, number>;
   camDetections: Record<string, Detection[]>;
   videoFps: Record<string, { stream_fps: number; detect_fps: number }>;
+  viewModes: Record<string, ViewMode>;
+  modeSavingMap: Record<string, boolean>;
   onReload: (id: string) => void;
-  onDisableRtsp: (id: string) => void;
+  onChangeViewMode: (id: string, mode: ViewMode) => void;
   onHideWebcam: () => void;
 };
 
@@ -254,10 +259,47 @@ const LiveTile = React.memo(function LiveTile({
   streamReload,
   camDetections,
   videoFps,
+  viewModes,
+  modeSavingMap,
   onReload,
-  onDisableRtsp,
+  onChangeViewMode,
   onHideWebcam,
 }: TileProps) {
+  const renderModeToggle = (id: string) => {
+    const mode = viewModes[id] ?? "auto";
+    const saving = !!modeSavingMap[id];
+
+    return (
+      <div className="inline-flex rounded-md overflow-hidden border border-slate-600">
+        <button
+          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            mode === "normal"
+              ? "bg-blue-600 text-white"
+              : "bg-slate-900/40 text-slate-300 hover:bg-slate-800"
+          }`}
+          onClick={() => onChangeViewMode(id, "normal")}
+          disabled={saving}
+          title="Show as normal single view"
+        >
+          Normal
+        </button>
+
+        <button
+          className={`px-3 py-1.5 text-xs font-medium border-l border-slate-600 transition-colors ${
+            mode === "fisheye"
+              ? "bg-orange-600 text-white"
+              : "bg-slate-900/40 text-slate-300 hover:bg-slate-800"
+          }`}
+          onClick={() => onChangeViewMode(id, "fisheye")}
+          disabled={saving}
+          title="Show as fisheye dewarp mosaic"
+        >
+          Fisheye
+        </button>
+      </div>
+    );
+  };
+
   if (src.kind === "webcam") {
     const nonce = streamReload[WEBCAM_ID] ?? 0;
     const streamUrl = `${apiBase}/api/live/webcam/stream?nonce=${nonce}`;
@@ -342,15 +384,9 @@ const LiveTile = React.memo(function LiveTile({
         </div>
 
         <div className="bg-slate-800/30 px-4 py-2 border-t border-slate-700">
-          <div className="flex items-center justify-between text-xs text-slate-400">
+          <div className="flex items-center justify-between gap-3 text-xs text-slate-400">
             <span>Stream: RTSP</span>
-            <button
-              className="text-slate-300 hover:text-white"
-              onClick={() => onDisableRtsp(s.id)}
-              title="Disable RTSP source"
-            >
-              Disable
-            </button>
+            {renderModeToggle(s.id)}
           </div>
         </div>
       </div>
@@ -402,9 +438,12 @@ const LiveTile = React.memo(function LiveTile({
       </div>
 
       <div className="bg-slate-800/30 px-4 py-2 border-t border-slate-700">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>Stream fps: {Number(fps.stream_fps) >= 1 ? fps.stream_fps : "AUTO"}</span>
-          <span>Detection fps: {fps.detect_fps}</span>
+        <div className="flex items-center justify-between gap-3 text-xs text-slate-400">
+          <div className="flex items-center gap-4">
+            <span>Stream fps: {Number(fps.stream_fps) >= 1 ? fps.stream_fps : "AUTO"}</span>
+            <span>Detection fps: {fps.detect_fps}</span>
+          </div>
+          {renderModeToggle(v.id)}
         </div>
       </div>
     </div>
@@ -415,6 +454,8 @@ export function AttireComplianceLiveView() {
   const [time, setTime] = useState(new Date());
   const [camDetections, setCamDetections] = useState<Record<string, Detection[]>>({});
   const [camMeta, setCamMeta] = useState<Record<string, { fps: number; resolution: [number, number] }>>({});
+  const [viewModes, setViewModes] = useState<Record<string, ViewMode>>({});
+  const [modeSavingMap, setModeSavingMap] = useState<Record<string, boolean>>({});
   const [videoFps, setVideoFps] = useState<Record<string, { stream_fps: number; detect_fps: number }>>({});
   const [uploadedVideos, setUploadedVideos] = useState<UploadedVideo[]>([]);
   const [rtspSources, setRtspSources] = useState<RtspSource[]>([]);
@@ -597,8 +638,80 @@ export function AttireComplianceLiveView() {
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [showWebcam, isTabVisible]);
-
   // -------------
+
+  const visibleSourceIdsKey = useMemo(() => {
+    return gridSources
+      .map((s) => {
+        if (s.kind === "webcam") return "";
+        if (s.kind === "offline") return s.video.id;
+        return s.rtsp.id;
+      })
+      .filter(Boolean)
+      .join("|");
+  }, [gridSources]);
+
+  useEffect(() => {
+    const ids = gridSources
+      .map((s) => {
+        if (s.kind === "webcam") return "";
+        if (s.kind === "offline") return s.video.id;
+        return s.rtsp.id;
+      })
+      .filter(Boolean);
+
+    if (!ids.length) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const results = await Promise.allSettled(
+        ids.map(async (id) => ({ id, mode: await fetchViewMode(id) }))
+      );
+
+      if (cancelled) return;
+
+      setViewModes((prev) => {
+        const next = { ...prev };
+        for (const r of results) {
+          if (r.status === "fulfilled") {
+            next[r.value.id] = r.value.mode;
+          }
+        }
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleSourceIdsKey]);
+
+  const handleChangeViewMode = useCallback(async (id: string, mode: ViewMode) => {
+    setModeSavingMap((prev) => ({ ...prev, [id]: true }));
+
+    try {
+      await saveViewMode(id, mode);
+
+      setViewModes((prev) => ({
+        ...prev,
+        [id]: mode,
+      }));
+
+      setStreamReload((prev) => ({
+        ...prev,
+        [id]: (prev[id] ?? 0) + 1,
+      }));
+
+      localStorage.setItem("attire:viewModeVer", String(Date.now()));
+      window.dispatchEvent(new Event("attire:viewModeChanged"));
+    } catch (e: any) {
+      alert(`Save view mode failed: ${e?.message || e}`);
+    } finally {
+      setModeSavingMap((prev) => ({ ...prev, [id]: false }));
+    }
+  }, [setModeSavingMap, setViewModes, setStreamReload]);
+
   useEffect(() => {
     const prev = prevLiveIdsRef.current;
     const curr = liveVideos.map(v => v.id);
@@ -898,10 +1011,6 @@ export function AttireComplianceLiveView() {
     }));
   }, []);
 
-  const handleDisableRtsp = useCallback(async (id: string) => {
-    await disableSourceAndRefresh(id);
-  }, []);
-
   const handleHideWebcam = useCallback(() => {
     setShowWebcam(false);
   }, []);
@@ -1015,8 +1124,10 @@ export function AttireComplianceLiveView() {
               streamReload={streamReload}
               camDetections={camDetections}
               videoFps={videoFps}
+              viewModes={viewModes}
+              modeSavingMap={modeSavingMap}
               onReload={handleReload}
-              onDisableRtsp={handleDisableRtsp}
+              onChangeViewMode={handleChangeViewMode}
               onHideWebcam={handleHideWebcam}
             />
           );

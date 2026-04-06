@@ -78,6 +78,13 @@ function toAbsLostFound(u?: string) {
   return `${LOSTFOUND_API_BASE}/${u}`;
 }
 
+function toAbsAttire(u?: string) {
+  if (!u) return undefined;
+  if (u.startsWith("http")) return u;
+  if (u.startsWith("/")) return `${ATTIRE_API_BASE}${u}`;
+  return `${ATTIRE_API_BASE}/${u}`;
+}
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [me, setMe] = useState<any>(null);
@@ -86,6 +93,7 @@ export default function App() {
     id: string;
     title: string;
     message: string;
+    imageUrl?: string;
     createdAt: number;
   };
 
@@ -381,6 +389,7 @@ export default function App() {
               message: `${
                 payload.source_name || payload.source_id || "Unknown"
               } • ${new Date(payload.timestamp * 1000).toLocaleTimeString()}`,
+              imageUrl: toAbsAttire(payload.imageUrl),
               createdAt: Date.now(),
             },
             ...prev,
@@ -945,7 +954,7 @@ export default function App() {
         <div className="flex flex-1 overflow-hidden min-w-0">{renderPage()}</div>
       </div>
 
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] space-y-3 w-[22rem]">
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] space-y-3 w-[24rem]">
         {attireToasts.map((t) => (
           <div
             key={t.id}
@@ -964,12 +973,23 @@ export default function App() {
             }}
             className="cursor-pointer select-none bg-slate-900 border border-slate-700 rounded-lg shadow-lg p-3 hover:border-slate-500 transition"
           >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
+            <div className="flex gap-3">
+              {t.imageUrl ? (
+                <img
+                  src={t.imageUrl}
+                  alt="Attire violation"
+                  className="w-16 h-16 rounded object-cover border border-slate-700 shrink-0"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
+              ) : null}
+
+              <div className="min-w-0 flex-1">
                 <div className="text-white text-sm font-semibold truncate">
                   {t.title}
                 </div>
-                <div className="text-slate-300 text-xs mt-1 truncate">
+                <div className="text-slate-300 text-xs mt-1 line-clamp-2">
                   {t.message}
                 </div>
               </div>
