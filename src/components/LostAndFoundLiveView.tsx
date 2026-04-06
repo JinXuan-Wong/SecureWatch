@@ -1393,14 +1393,30 @@ export function LiveViewPage({ mode }: { mode: "lost-found" | "attire" }) {
     <div className="h-full w-full px-6 py-4 overflow-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-semibold text-white">
-            {mode === "lost-found" ? "Lost & Found Live View" : "Attire Compliance Live View"}
+          <h1 className="text-3xl font-bold text-white tracking-tight">
+            {mode === "lost-found"
+              ? "Lost & Found Live Monitoring"
+              : "Attire Compliance Live Monitoring"}
           </h1>
-          <p className="text-slate-400 text-sm">
+
+          {mode === "lost-found" && (
+            <p className="text-sm text-slate-400 mt-2 max-w-2xl">
+              Real-time CCTV monitoring for detecting and tracking unattended items across multiple camera sources.
+            </p>
+          )}
+
+          {mode === "attire" && (
+            <p className="text-sm text-slate-400 mt-2 max-w-2xl">
+              Real-time monitoring of attire compliance violations detected from CCTV surveillance streams.
+            </p>
+          )}
+
+          <p className="text-slate-500 text-xs mt-2">
             Live source: <span className="text-slate-300">{API_BASE || "NOT CONFIGURED"}</span>
           </p>
+
           <p className="text-slate-500 text-xs mt-1">
-            Use the selector bar to choose up to 4 cameras. Changes reflect immediately in the live view below.
+            Select up to 4 cameras using the selector below. Changes are reflected instantly in the live view.
           </p>
         </div>
 
