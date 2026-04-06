@@ -1043,6 +1043,11 @@ export function AttireComplianceLiveView() {
     setShowWebcam(false);
   }, []);
 
+  const handleOpenAttireDashboard = useCallback(() => {
+    localStorage.setItem("nav:lastPage", "dashboard");
+    window.dispatchEvent(new Event("nav:changed"));
+  }, []);
+
   const getSourceId = (src: GridSource) => {
     if (src.kind === "webcam") return WEBCAM_ID;
     if (src.kind === "offline") return src.video.id;
@@ -1083,15 +1088,24 @@ export function AttireComplianceLiveView() {
             <div className="flex items-center gap-2 text-slate-400">
               <Circle className="w-2 h-2 fill-green-500 text-green-500 animate-pulse" />
               <span>Live</span>
+
               <button
-                className={`px-3 py-2 rounded-md border text-sm ${
+                className={`px-3 py-2 rounded-md border text-sm transition-colors ${
                   showWebcam
                     ? "border-green-600 bg-green-600/20 text-green-200"
-                    : "border-slate-700 bg-slate-900/40 text-slate-300"
+                    : "border-slate-700 bg-slate-900/40 text-slate-300 hover:bg-slate-800"
                 }`}
                 onClick={() => setShowWebcam((v) => !v)}
               >
                 {showWebcam ? "Webcam: ON" : "Webcam: OFF"}
+              </button>
+
+              <button
+                className="px-3 py-2 rounded-md border border-blue-600 bg-blue-600/20 text-blue-200 text-sm hover:bg-blue-600/30 transition-colors"
+                onClick={handleOpenAttireDashboard}
+                title="Open Attire Dashboard to choose video source"
+              >
+                Choose Source
               </button>
             </div>
             <div className="text-slate-400">{time.toLocaleTimeString()}</div>
