@@ -104,6 +104,32 @@ function downloadBlob(filename: string, data: Blob) {
   URL.revokeObjectURL(url);
 }
 
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      mode: "cors",
+      credentials: "omit",
+      cache: "no-store",
+    });
+
+    if (!res.ok) return null;
+
+    const blob = await res.blob();
+    return await blobToDataUrl(blob);
+  } catch {
+    return null;
+  }
+}
+
 async function waitForImagesToLoad(container: HTMLElement) {
   const images = Array.from(container.querySelectorAll("img"));
 
@@ -120,7 +146,7 @@ async function waitForImagesToLoad(container: HTMLElement) {
         img.addEventListener("load", done, { once: true });
         img.addEventListener("error", done, { once: true });
 
-        setTimeout(() => resolve(), 5000);
+        setTimeout(() => resolve(), 8000);
       });
     })
   );
@@ -171,8 +197,8 @@ function StatCard({
     tone === "red"
       ? "text-red-400"
       : tone === "green"
-        ? "text-emerald-400"
-        : "text-white";
+      ? "text-emerald-400"
+      : "text-white";
 
   return (
     <div className="bg-white/5 ring-1 ring-white/10 rounded-2xl p-6">
@@ -221,8 +247,8 @@ function PdfStatCard({
     tone === "red"
       ? "text-red-600"
       : tone === "green"
-        ? "text-emerald-600"
-        : "text-slate-900";
+      ? "text-emerald-600"
+      : "text-slate-900";
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
@@ -260,6 +286,7 @@ function PdfChartCard({
 function LostAndFoundReportsPageInner() {
   const [items, setItems] = useState<LostFoundItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pdfEvidenceMap, setPdfEvidenceMap] = useState<Record<string, string>>({});
 
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "lost" | "solved">("all");
@@ -268,7 +295,6 @@ function LostAndFoundReportsPageInner() {
   const abortRef = useRef<AbortController | null>(null);
 
   const chartsRef = useRef<HTMLDivElement | null>(null);
-
   const pngChartsRef = useRef<HTMLDivElement | null>(null);
   const pdfPage1Ref = useRef<HTMLDivElement | null>(null);
   const pdfChartsRef = useRef<HTMLDivElement | null>(null);
@@ -291,8 +317,8 @@ function LostAndFoundReportsPageInner() {
       const arr: LostFoundItem[] = Array.isArray(js?.items)
         ? js.items
         : Array.isArray(js)
-          ? js
-          : [];
+        ? js
+        : [];
 
       const safe = arr
         .filter((it) => it && typeof it === "object" && (it as any).id != null)
@@ -306,20 +332,20 @@ function LostAndFoundReportsPageInner() {
             typeof it.firstSeenTs === "number"
               ? it.firstSeenTs
               : typeof it.first_seen_ts === "number"
-                ? it.first_seen_ts
-                : undefined,
+              ? it.first_seen_ts
+              : undefined,
           lastSeenTs:
             typeof it.lastSeenTs === "number"
               ? it.lastSeenTs
               : typeof it.last_seen_ts === "number"
-                ? it.last_seen_ts
-                : undefined,
+              ? it.last_seen_ts
+              : undefined,
           imageUrl: resolveLostFoundUrl(it.imageUrl || it.image_url || null),
         }));
 
       setItems(safe);
     } catch {
-      // ignore abort/fetch issues
+      // ignore
     } finally {
       setLoading(false);
     }
@@ -417,6 +443,38 @@ function LostAndFoundReportsPageInner() {
 
   const latestEvidenceItems = useMemo(() => {
     return filtered.filter((it) => !!it.imageUrl).slice(0, 6);
+  }, [filtered]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function buildPdfEvidenceImages() {
+      const evidenceItems = filtered.filter((it) => !!it.imageUrl).slice(0, 6);
+
+      const entries = await Promise.all(
+        evidenceItems.map(async (it) => {
+          const dataUrl = it.imageUrl
+            ? await fetchImageAsDataUrl(it.imageUrl)
+            : null;
+          return [it.id, dataUrl || ""] as const;
+        })
+      );
+
+      if (cancelled) return;
+
+      const nextMap: Record<string, string> = {};
+      for (const [id, dataUrl] of entries) {
+        if (dataUrl) nextMap[id] = dataUrl;
+      }
+
+      setPdfEvidenceMap(nextMap);
+    }
+
+    buildPdfEvidenceImages();
+
+    return () => {
+      cancelled = true;
+    };
   }, [filtered]);
 
   function exportCSV() {
@@ -524,7 +582,7 @@ function LostAndFoundReportsPageInner() {
 
     const pdf = new jsPDF("p", "mm", "a4");
 
-    // Page 1 summary
+    // -------- Page 1 summary
     const pW = pdf.internal.pageSize.getWidth();
     const pH = pdf.internal.pageSize.getHeight();
     const margin = 8;
@@ -542,7 +600,7 @@ function LostAndFoundReportsPageInner() {
     const coverH = (coverCanvas.height * coverW) / coverCanvas.width;
     pdf.addImage(coverImg, "PNG", margin, 8, coverW, Math.min(coverH, pH - 16));
 
-    // Page 2 charts - landscape
+    // -------- Page 2 charts (landscape)
     const chartsCanvas = await html2canvas(pdfChartsRef.current, {
       scale: 2,
       backgroundColor: "#ffffff",
@@ -570,7 +628,7 @@ function LostAndFoundReportsPageInner() {
       Math.min(chartsLandscapeH, cH - 16)
     );
 
-    // Detailed table - landscape
+    // -------- Detailed table (landscape)
     pdf.addPage("a4", "l");
 
     let tablePage = 3;
@@ -655,17 +713,17 @@ function LostAndFoundReportsPageInner() {
 
     drawLandscapeFooter(tablePage);
 
-    // Evidence page
+    // -------- Evidence page (portrait)
     if (latestEvidenceItems.length > 0 && pdfEvidenceRef.current) {
       await waitForImagesToLoad(pdfEvidenceRef.current);
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       const evidenceCanvas = await html2canvas(pdfEvidenceRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
         allowTaint: false,
-        imageTimeout: 15000,
+        imageTimeout: 20000,
         windowWidth: pdfEvidenceRef.current.scrollWidth,
         windowHeight: pdfEvidenceRef.current.scrollHeight,
       });
@@ -1171,52 +1229,54 @@ function LostAndFoundReportsPageInner() {
           </div>
 
           <div className="grid grid-cols-2 gap-6">
-            {latestEvidenceItems.map((it) => (
-              <div
-                key={it.id}
-                className="rounded-2xl border border-slate-200 overflow-hidden bg-white"
-              >
-                <div className="h-[240px] bg-slate-100 flex items-center justify-center">
-                  {it.imageUrl ? (
-                    <img
-                      src={it.imageUrl}
-                      alt={it.label || "Evidence"}
-                      className="w-full h-full object-cover"
-                      crossOrigin="anonymous"
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.style.display = "none";
-                        const parent = target.parentElement;
-                        if (parent && !parent.querySelector(".evidence-fallback")) {
-                          const fallback = document.createElement("div");
-                          fallback.className = "evidence-fallback text-slate-400 text-lg";
-                          fallback.textContent = "Image unavailable";
-                          parent.appendChild(fallback);
-                        }
-                      }}
-                    />
-                  ) : (
-                    <div className="text-slate-400 text-base">Image unavailable</div>
-                  )}
-                </div>
+            {latestEvidenceItems.map((it) => {
+              const pdfImageSrc = pdfEvidenceMap[it.id] || "";
 
-                <div className="p-4">
-                  <div className="font-semibold text-slate-900 text-lg">
-                    {it.label || "-"}
+              return (
+                <div
+                  key={it.id}
+                  className="rounded-2xl border border-slate-200 overflow-hidden bg-white"
+                >
+                  <div className="h-[240px] bg-slate-100 flex items-center justify-center">
+                    {pdfImageSrc ? (
+                      <img
+                        src={pdfImageSrc}
+                        alt={it.label || "Evidence"}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = "none";
+                          const parent = target.parentElement;
+                          if (parent && !parent.querySelector(".evidence-fallback")) {
+                            const fallback = document.createElement("div");
+                            fallback.className = "evidence-fallback text-slate-400 text-lg";
+                            fallback.textContent = "Image unavailable";
+                            parent.appendChild(fallback);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <div className="text-slate-400 text-base">Image unavailable</div>
+                    )}
                   </div>
-                  <div className="text-base text-slate-600 mt-1">
-                    Location: {it.location || "-"}
-                  </div>
-                  <div className="text-base text-slate-600">
-                    Source: {(it.source || "-").toUpperCase()}
-                  </div>
-                  <div className="text-base text-slate-600">
-                    Seen: {fmtTs(it.lastSeenTs)}
+
+                  <div className="p-4">
+                    <div className="font-semibold text-slate-900 text-lg">
+                      {it.label || "-"}
+                    </div>
+                    <div className="text-base text-slate-600 mt-1">
+                      Location: {it.location || "-"}
+                    </div>
+                    <div className="text-base text-slate-600">
+                      Source: {(it.source || "-").toUpperCase()}
+                    </div>
+                    <div className="text-base text-slate-600">
+                      Seen: {fmtTs(it.lastSeenTs)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
