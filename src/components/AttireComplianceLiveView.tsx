@@ -28,13 +28,27 @@ interface Detection {
 }
 
 type ViewMode = "auto" | "normal" | "fisheye";
+type EffectiveMode = "normal" | "fisheye";
 
-async function fetchViewMode(videoId: string): Promise<ViewMode> {
+type ViewModeState = {
+  saved: ViewMode;
+  effective: EffectiveMode;
+};
+
+async function fetchViewMode(videoId: string): Promise<ViewModeState> {
   const res = await fetch(`${API_BASE}/api/attire/view-mode/${videoId}`);
   if (!res.ok) throw new Error("Failed to load view mode");
   const data = await res.json();
-  const mode = String(data?.mode ?? "auto").toLowerCase();
-  return mode === "normal" || mode === "fisheye" ? mode : "auto";
+
+  const savedRaw = String(data?.mode ?? "auto").toLowerCase();
+  const saved: ViewMode =
+    savedRaw === "normal" || savedRaw === "fisheye" ? savedRaw : "auto";
+
+  const effectiveRaw = String(data?.effective_mode ?? "").toLowerCase();
+  const effective: EffectiveMode =
+    effectiveRaw === "fisheye" ? "fisheye" : "normal";
+
+  return { saved, effective };
 }
 
 async function saveViewMode(videoId: string, mode: ViewMode) {
@@ -266,33 +280,44 @@ const LiveTile = React.memo(function LiveTile({
   onHideWebcam,
 }: TileProps) {
   const renderModeToggle = (id: string) => {
-    const mode = viewModes[id] ?? "auto";
+    const state = viewModes[id] ?? { saved: "auto", effective: "normal" };
     const saving = !!modeSavingMap[id];
+
+    const activeMode =
+      state.saved === "auto" ? state.effective : state.saved;
 
     return (
       <div className="inline-flex rounded-md overflow-hidden border border-slate-600">
         <button
           className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-            mode === "normal"
+            activeMode === "normal"
               ? "bg-blue-600 text-white"
               : "bg-slate-900/40 text-slate-300 hover:bg-slate-800"
           }`}
           onClick={() => onChangeViewMode(id, "normal")}
           disabled={saving}
-          title="Show as normal single view"
+          title={
+            state.saved === "auto"
+              ? "Auto-detected as normal"
+              : "Show as normal single view"
+          }
         >
           Normal
         </button>
 
         <button
           className={`px-3 py-1.5 text-xs font-medium border-l border-slate-600 transition-colors ${
-            mode === "fisheye"
+            activeMode === "fisheye"
               ? "bg-orange-600 text-white"
               : "bg-slate-900/40 text-slate-300 hover:bg-slate-800"
           }`}
           onClick={() => onChangeViewMode(id, "fisheye")}
           disabled={saving}
-          title="Show as fisheye dewarp mosaic"
+          title={
+            state.saved === "auto"
+              ? "Auto-detected as fisheye"
+              : "Show as fisheye dewarp mosaic"
+          }
         >
           Fisheye
         </button>
@@ -454,7 +479,7 @@ export function AttireComplianceLiveView() {
   const [time, setTime] = useState(new Date());
   const [camDetections, setCamDetections] = useState<Record<string, Detection[]>>({});
   const [camMeta, setCamMeta] = useState<Record<string, { fps: number; resolution: [number, number] }>>({});
-  const [viewModes, setViewModes] = useState<Record<string, ViewMode>>({});
+  const [viewModes, setViewModes] = useState<Record<string, ViewModeState>>({});
   const [modeSavingMap, setModeSavingMap] = useState<Record<string, boolean>>({});
   const [videoFps, setVideoFps] = useState<Record<string, { stream_fps: number; detect_fps: number }>>({});
   const [uploadedVideos, setUploadedVideos] = useState<UploadedVideo[]>([]);
@@ -695,7 +720,10 @@ export function AttireComplianceLiveView() {
 
       setViewModes((prev) => ({
         ...prev,
-        [id]: mode,
+        [id]: {
+          saved: mode,
+          effective: mode === "fisheye" ? "fisheye" : "normal",
+        },
       }));
 
       setStreamReload((prev) => ({
