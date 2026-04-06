@@ -104,23 +104,6 @@ function downloadBlob(filename: string, data: Blob) {
   URL.revokeObjectURL(url);
 }
 
-async function loadImageAsDataUrl(src: string): Promise<string | null> {
-  try {
-    const res = await fetch(src, { mode: "cors" });
-    if (!res.ok) return null;
-    const blob = await res.blob();
-
-    return await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-}
-
 /* ================= TOOLTIP ================= */
 
 function NiceTooltip({ active, payload, label }: any) {
@@ -221,15 +204,15 @@ function PdfStatCard({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
-      <div className="text-sm text-slate-500">{title}</div>
-      <div className={`mt-2 text-3xl font-bold ${vCls}`}>{value}</div>
+      <div className="text-base text-slate-500">{title}</div>
+      <div className={`mt-2 text-4xl font-bold ${vCls}`}>{value}</div>
     </div>
   );
 }
 
 function PdfChartCard({
   title,
-  height = 260,
+  height = 320,
   children,
 }: {
   title: string;
@@ -239,8 +222,8 @@ function PdfChartCard({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
       <div className="mb-4 flex items-center justify-between">
-        <div className="font-semibold text-slate-900">{title}</div>
-        <div className="text-xs text-slate-500">Auto-generated</div>
+        <div className="font-semibold text-slate-900 text-xl">{title}</div>
+        <div className="text-sm text-slate-500">Auto-generated</div>
       </div>
 
       <div className="rounded-xl border border-slate-100 bg-white p-2" style={{ height }}>
@@ -268,6 +251,7 @@ function LostAndFoundReportsPageInner() {
   const pngChartsRef = useRef<HTMLDivElement | null>(null);
   const pdfPage1Ref = useRef<HTMLDivElement | null>(null);
   const pdfChartsRef = useRef<HTMLDivElement | null>(null);
+  const pdfEvidenceRef = useRef<HTMLDivElement | null>(null);
 
   async function load() {
     abortRef.current?.abort();
@@ -286,8 +270,8 @@ function LostAndFoundReportsPageInner() {
       const arr: LostFoundItem[] = Array.isArray(js?.items)
         ? js.items
         : Array.isArray(js)
-        ? js
-        : [];
+          ? js
+          : [];
 
       const safe = arr
         .filter((it) => it && typeof it === "object" && (it as any).id != null)
@@ -301,14 +285,14 @@ function LostAndFoundReportsPageInner() {
             typeof it.firstSeenTs === "number"
               ? it.firstSeenTs
               : typeof it.first_seen_ts === "number"
-              ? it.first_seen_ts
-              : undefined,
+                ? it.first_seen_ts
+                : undefined,
           lastSeenTs:
             typeof it.lastSeenTs === "number"
               ? it.lastSeenTs
               : typeof it.last_seen_ts === "number"
-              ? it.last_seen_ts
-              : undefined,
+                ? it.last_seen_ts
+                : undefined,
           imageUrl: resolveLostFoundUrl(it.imageUrl || it.image_url || null),
         }));
 
@@ -411,9 +395,7 @@ function LostAndFoundReportsPageInner() {
   }, [dailyTrend]);
 
   const latestEvidenceItems = useMemo(() => {
-    return filtered
-      .filter((it) => !!it.imageUrl)
-      .slice(0, 6);
+    return filtered.filter((it) => !!it.imageUrl).slice(0, 6);
   }, [filtered]);
 
   /* ================= CSV ================= */
@@ -545,7 +527,7 @@ function LostAndFoundReportsPageInner() {
     const coverH = (coverCanvas.height * coverW) / coverCanvas.width;
     pdf.addImage(coverImg, "PNG", margin, 8, coverW, Math.min(coverH, pH - 16));
 
-    // -------- Page 2 charts (portrait)
+    // -------- Page 2 charts (landscape)
     const chartsCanvas = await html2canvas(pdfChartsRef.current, {
       scale: 2,
       backgroundColor: "#ffffff",
@@ -555,10 +537,23 @@ function LostAndFoundReportsPageInner() {
     });
 
     const chartsImg = chartsCanvas.toDataURL("image/png");
-    const chartsW = pW - margin * 2;
-    const chartsH = (chartsCanvas.height * chartsW) / chartsCanvas.width;
-    pdf.addPage("a4", "p");
-    pdf.addImage(chartsImg, "PNG", margin, 8, chartsW, Math.min(chartsH, pH - 16));
+    pdf.addPage("a4", "l");
+
+    const cW = pdf.internal.pageSize.getWidth();
+    const cH = pdf.internal.pageSize.getHeight();
+    const cMargin = 8;
+
+    const chartsLandscapeW = cW - cMargin * 2;
+    const chartsLandscapeH = (chartsCanvas.height * chartsLandscapeW) / chartsCanvas.width;
+
+    pdf.addImage(
+      chartsImg,
+      "PNG",
+      cMargin,
+      8,
+      chartsLandscapeW,
+      Math.min(chartsLandscapeH, cH - 16)
+    );
 
     // -------- Detailed table (landscape)
     pdf.addPage("a4", "l");
@@ -645,68 +640,35 @@ function LostAndFoundReportsPageInner() {
 
     drawLandscapeFooter(tablePage);
 
-    // -------- Evidence page with pictures
-    if (latestEvidenceItems.length > 0) {
+    // -------- Evidence page (portrait, html2canvas capture)
+    if (latestEvidenceItems.length > 0 && pdfEvidenceRef.current) {
+      const evidenceCanvas = await html2canvas(pdfEvidenceRef.current, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        windowWidth: pdfEvidenceRef.current.scrollWidth,
+        windowHeight: pdfEvidenceRef.current.scrollHeight,
+      });
+
+      const evidenceImg = evidenceCanvas.toDataURL("image/png");
+
       pdf.addPage("a4", "p");
 
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(16);
-      pdf.setTextColor(20, 30, 50);
-      pdf.text("Latest Evidence Snapshots", 10, 14);
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const eMargin = 8;
 
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(9);
-      pdf.setTextColor(100, 116, 139);
-      pdf.text("Recent item images for quick review", 10, 20);
+      const imgW = pageW - eMargin * 2;
+      const imgH = (evidenceCanvas.height * imgW) / evidenceCanvas.width;
 
-      const imageDataList = await Promise.all(
-        latestEvidenceItems.map(async (it) => ({
-          item: it,
-          dataUrl: it.imageUrl ? await loadImageAsDataUrl(it.imageUrl) : null,
-        }))
+      pdf.addImage(
+        evidenceImg,
+        "PNG",
+        eMargin,
+        8,
+        imgW,
+        Math.min(imgH, pageH - 16)
       );
-
-      const cardW = 88;
-      const cardH = 75;
-      const startX = 10;
-      const startY = 28;
-      const gapX = 10;
-      const gapY = 10;
-
-      imageDataList.forEach((entry, i) => {
-        const col = i % 2;
-        const row = Math.floor(i / 2);
-        const x = startX + col * (cardW + gapX);
-        const y = startY + row * (cardH + gapY);
-
-        pdf.setDrawColor(220, 226, 232);
-        pdf.roundedRect(x, y, cardW, cardH, 3, 3);
-
-        if (entry.dataUrl) {
-          try {
-            pdf.addImage(entry.dataUrl, "JPEG", x + 3, y + 3, cardW - 6, 38);
-          } catch {
-            pdf.setFontSize(9);
-            pdf.setTextColor(150, 150, 150);
-            pdf.text("Image unavailable", x + cardW / 2, y + 22, { align: "center" });
-          }
-        } else {
-          pdf.setFontSize(9);
-          pdf.setTextColor(150, 150, 150);
-          pdf.text("Image unavailable", x + cardW / 2, y + 22, { align: "center" });
-        }
-
-        pdf.setTextColor(30, 41, 59);
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9);
-        pdf.text(ellipsis(entry.item.label, 20), x + 3, y + 48);
-
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
-        pdf.text(`Location: ${ellipsis(entry.item.location, 22)}`, x + 3, y + 54);
-        pdf.text(`Source: ${ellipsis((entry.item.source || "").toUpperCase(), 10)}`, x + 3, y + 60);
-        pdf.text(`Seen: ${ellipsis(fmtTs(entry.item.lastSeenTs), 22)}`, x + 3, y + 66);
-      });
     }
 
     pdf.save(`lost_found_report_${getNowFilenamePart()}.pdf`);
@@ -1069,29 +1031,29 @@ function LostAndFoundReportsPageInner() {
 
           <div className="grid grid-cols-3 gap-4 mb-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <div className="text-sm font-semibold text-slate-700 mb-2">Top Item</div>
-              <div className="text-2xl font-bold text-slate-900">{topItem}</div>
-              <div className="text-sm text-slate-500 mt-1">{topItemCount} records</div>
+              <div className="text-base font-semibold text-slate-700 mb-2">Top Item</div>
+              <div className="text-3xl font-bold text-slate-900">{topItem}</div>
+              <div className="text-base text-slate-500 mt-1">{topItemCount} records</div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <div className="text-sm font-semibold text-slate-700 mb-2">Top Location</div>
-              <div className="text-2xl font-bold text-slate-900 break-words">{topLocation}</div>
-              <div className="text-sm text-slate-500 mt-1">{topLocationCount} records</div>
+              <div className="text-base font-semibold text-slate-700 mb-2">Top Location</div>
+              <div className="text-3xl font-bold text-slate-900 break-words">{topLocation}</div>
+              <div className="text-base text-slate-500 mt-1">{topLocationCount} records</div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <div className="text-sm font-semibold text-slate-700 mb-2">Peak Day</div>
-              <div className="text-2xl font-bold text-slate-900">{peakDay?.day || "-"}</div>
-              <div className="text-sm text-slate-500 mt-1">
+              <div className="text-base font-semibold text-slate-700 mb-2">Peak Day</div>
+              <div className="text-3xl font-bold text-slate-900">{peakDay?.day || "-"}</div>
+              <div className="text-base text-slate-500 mt-1">
                 {peakDay ? `${peakDay.count} events` : "No data"}
               </div>
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
-            <div className="text-lg font-semibold text-slate-900 mb-4">Key Insights</div>
-            <div className="grid grid-cols-1 gap-3 text-sm text-slate-700">
+            <div className="text-2xl font-semibold text-slate-900 mb-4">Key Insights</div>
+            <div className="grid grid-cols-1 gap-3 text-base text-slate-700">
               <div>• Most frequent item detected: {topItem}</div>
               <div>• Most common location: {topLocation}</div>
               <div>• Total filtered records: {summary.total}</div>
@@ -1105,44 +1067,44 @@ function LostAndFoundReportsPageInner() {
       <div className="fixed -left-[99999px] top-0 pointer-events-none" aria-hidden="true">
         <div
           ref={pdfChartsRef}
-          className="w-[1200px] bg-white text-slate-900 p-10"
+          className="w-[1600px] bg-white text-slate-900 p-10"
           style={{ fontFamily: "Arial, sans-serif" }}
         >
           <div className="mb-8">
-            <div className="text-sm font-semibold tracking-[0.2em] uppercase text-sky-700">
+            <div className="text-base font-semibold tracking-[0.2em] uppercase text-sky-700">
               SecureWatch Pro v2.0
             </div>
-            <div className="text-3xl font-bold mt-2">Analytical Charts</div>
-            <div className="text-sm text-slate-500 mt-2">
+            <div className="text-4xl font-bold mt-2">Analytical Charts</div>
+            <div className="text-lg text-slate-500 mt-2">
               Lost &amp; Found trends and distribution overview
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-6 mb-6">
-            <PdfChartCard title="Item Distribution" height={250}>
+            <PdfChartCard title="Item Distribution" height={320}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={itemDistribution} margin={{ top: 10, right: 18, left: 0, bottom: 25 }}>
                   <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                  <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} interval={0} />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 14 }} interval={0} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 14 }} />
                   <Tooltip content={<PdfTooltip />} />
                   <Bar dataKey="count" name="Count" fill="#2563eb" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </PdfChartCard>
 
-            <PdfChartCard title="Location Distribution" height={250}>
+            <PdfChartCard title="Location Distribution" height={320}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={locationDistribution} margin={{ top: 10, right: 18, left: 0, bottom: 25 }}>
                   <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
                   <XAxis
                     dataKey="name"
                     stroke="#64748b"
-                    tick={{ fontSize: 12 }}
+                    tick={{ fontSize: 14 }}
                     interval={0}
                     tickFormatter={(v) => formatLocationLabel(String(v))}
                   />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 12 }} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 14 }} />
                   <Tooltip content={<PdfTooltip />} />
                   <Bar dataKey="count" name="Count" fill="#059669" radius={[8, 8, 0, 0]} />
                 </BarChart>
@@ -1150,12 +1112,12 @@ function LostAndFoundReportsPageInner() {
             </PdfChartCard>
           </div>
 
-          <PdfChartCard title="Daily Trend" height={250}>
+          <PdfChartCard title="Daily Trend" height={320}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dailyTrend} margin={{ top: 10, right: 18, left: 0, bottom: 25 }}>
                 <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                <XAxis dataKey="day" stroke="#64748b" tick={{ fontSize: 12 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 12 }} />
+                <XAxis dataKey="day" stroke="#64748b" tick={{ fontSize: 14 }} />
+                <YAxis stroke="#64748b" tick={{ fontSize: 14 }} />
                 <Tooltip content={<PdfTooltip />} />
                 <Line
                   type="monotone"
@@ -1163,12 +1125,80 @@ function LostAndFoundReportsPageInner() {
                   name="Count"
                   stroke="#ea580c"
                   strokeWidth={3}
-                  dot={{ r: 4 }}
-                  activeDot={{ r: 6 }}
+                  dot={{ r: 5 }}
+                  activeDot={{ r: 7 }}
                 />
               </LineChart>
             </ResponsiveContainer>
           </PdfChartCard>
+        </div>
+      </div>
+
+      {/* ======================= HIDDEN PDF EVIDENCE PAGE ======================= */}
+      <div className="fixed -left-[99999px] top-0 pointer-events-none" aria-hidden="true">
+        <div
+          ref={pdfEvidenceRef}
+          className="w-[1200px] bg-white text-slate-900 p-10"
+          style={{ fontFamily: "Arial, sans-serif" }}
+        >
+          <div className="mb-8">
+            <div className="text-sm font-semibold tracking-[0.2em] uppercase text-sky-700">
+              SecureWatch Pro v2.0
+            </div>
+            <div className="text-3xl font-bold mt-2">Latest Evidence Snapshots</div>
+            <div className="text-base text-slate-500 mt-2">
+              Recent item images for quick review
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            {latestEvidenceItems.map((it) => (
+              <div
+                key={it.id}
+                className="rounded-2xl border border-slate-200 overflow-hidden bg-white"
+              >
+                <div className="h-[240px] bg-slate-100 flex items-center justify-center">
+                  {it.imageUrl ? (
+                    <img
+                      src={it.imageUrl}
+                      alt={it.label || "Evidence"}
+                      className="w-full h-full object-cover"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                        const parent = target.parentElement;
+                        if (parent && !parent.querySelector(".evidence-fallback")) {
+                          const fallback = document.createElement("div");
+                          fallback.className =
+                            "evidence-fallback text-slate-400 text-base";
+                          fallback.textContent = "Image unavailable";
+                          parent.appendChild(fallback);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="text-slate-400 text-base">Image unavailable</div>
+                  )}
+                </div>
+
+                <div className="p-4">
+                  <div className="font-semibold text-slate-900 text-lg">
+                    {it.label || "-"}
+                  </div>
+                  <div className="text-base text-slate-600 mt-1">
+                    Location: {it.location || "-"}
+                  </div>
+                  <div className="text-base text-slate-600">
+                    Source: {(it.source || "-").toUpperCase()}
+                  </div>
+                  <div className="text-base text-slate-600">
+                    Seen: {fmtTs(it.lastSeenTs)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
