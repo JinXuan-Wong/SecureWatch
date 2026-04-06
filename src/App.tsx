@@ -89,11 +89,27 @@ export default function App() {
     createdAt: number;
   };
 
+  type LostFoundToast = {
+    id: string;
+    title: string;
+    message: string;
+    imageUrl?: string;
+    createdAt: number;
+  };
+
   const [attireToasts, setAttireToasts] = useState<AttireToast[]>([]);
+  const [lfToasts, setLfToasts] = useState<LostFoundToast[]>([]);
+
   const [unreadAttireNotifs, setUnreadAttireNotifs] = useState(0);
+  const [unreadLfNotifs, setUnreadLfNotifs] = useState(0);
+
   const [notifConfig, setNotifConfig] = useState<any>(null);
+  const [lfNotifSettings, setLfNotifSettings] = useState<any>(null);
+
   const notifConfigRef = useRef<any>(null);
   const notifFetchInFlightRef = useRef(false);
+  const lfToastTimersRef = useRef<Record<string, number>>({});
+  const lfSeenToastIdsRef = useRef<Set<string>>(new Set());
 
   async function refreshNotifConfig() {
     if (notifFetchInFlightRef.current) return;
@@ -115,6 +131,18 @@ export default function App() {
     } catch {
     } finally {
       notifFetchInFlightRef.current = false;
+    }
+  }
+
+  async function refreshLostFoundNotifSettings() {
+    try {
+      const r = await fetch(`${LOSTFOUND_API_BASE}/api/lostfound/settings`, {
+        cache: "no-store",
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      setLfNotifSettings(data);
+    } catch {
     }
   }
 
@@ -214,13 +242,17 @@ export default function App() {
     if (!isAuthenticated) return;
 
     refreshNotifConfig();
+    refreshLostFoundNotifSettings();
 
     const onNotifChanged = () => refreshNotifConfig();
+    const onLfNotifChanged = () => refreshLostFoundNotifSettings();
 
     window.addEventListener("attire:notifChanged", onNotifChanged);
+    window.addEventListener("lostfound:notifChanged", onLfNotifChanged);
 
     return () => {
       window.removeEventListener("attire:notifChanged", onNotifChanged);
+      window.removeEventListener("lostfound:notifChanged", onLfNotifChanged);
     };
   }, [isAuthenticated]);
 
@@ -375,14 +407,90 @@ export default function App() {
     };
 
     return () => es.close();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, notifConfig]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const es = new EventSource(
+      `${LOSTFOUND_API_BASE}/api/lostfound/notifications/stream`
+    );
+
+    es.onmessage = (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data);
+        const rawId = String(payload?.id ?? "").trim();
+        if (!rawId) return;
+
+        if (lfSeenToastIdsRef.current.has(rawId)) return;
+        lfSeenToastIdsRef.current.add(rawId);
+
+        const notificationsEnabled =
+          lfNotifSettings?.notifications_enabled ?? true;
+        const soundEnabled =
+          lfNotifSettings?.play_sound ??
+          lfNotifSettings?.notifications_sound_enabled ??
+          false;
+        const toastSec = 6;
+
+        if (!notificationsEnabled) return;
+
+        const toastId = `lf-${rawId}`;
+        const cameraName =
+          payload.cameraName || payload.camera_id || payload.cameraId || "Unknown";
+        const message =
+          payload.message ||
+          `Lost item detected at ${cameraName}`;
+
+        setLfToasts((prev) =>
+          [
+            {
+              id: toastId,
+              title: "Lost Item Detected",
+              message: `${cameraName} • ${message}`,
+              imageUrl: toAbsLostFound(payload.imageUrl),
+              createdAt: Date.now(),
+            },
+            ...prev,
+          ].slice(0, 5)
+        );
+
+        setUnreadLfNotifs((x) => x + 1);
+
+        if (soundEnabled && notifyAudioRef.current) {
+          notifyAudioRef.current.currentTime = 0;
+          notifyAudioRef.current.play().catch(() => {});
+        }
+
+        if (lfToastTimersRef.current[toastId]) {
+          window.clearTimeout(lfToastTimersRef.current[toastId]);
+        }
+
+        lfToastTimersRef.current[toastId] = window.setTimeout(() => {
+          setLfToasts((prev) => prev.filter((t) => t.id !== toastId));
+          delete lfToastTimersRef.current[toastId];
+        }, toastSec * 1000);
+      } catch (err) {
+        console.error("Failed to parse Lost & Found SSE payload:", err);
+      }
+    };
+
+    es.onerror = (err) => {
+      console.error("Lost & Found SSE connection error:", err);
+    };
+
+    return () => es.close();
+  }, [isAuthenticated, lfNotifSettings]);
 
   useEffect(() => {
     notifConfigRef.current = notifConfig;
   }, [notifConfig]);
 
   useEffect(() => {
-    if (currentPage === "events") setUnreadAttireNotifs(0);
+    if (currentPage === "events") {
+      setUnreadAttireNotifs(0);
+      setUnreadLfNotifs(0);
+    }
   }, [currentPage]);
 
   useEffect(() => {
@@ -509,6 +617,15 @@ export default function App() {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      Object.values(lfToastTimersRef.current).forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      lfToastTimersRef.current = {};
+    };
+  }, []);
+
   const handleLogin = (user: any) => {
     setMe(user);
     setIsAuthenticated(true);
@@ -623,7 +740,10 @@ export default function App() {
   const lfOfflineCount = lfCameras.filter((c) => c.status === "offline").length;
 
   const online = activeModule === "attire" ? activeSources : lfOnlineCount;
-  const warnings = activeModule === "attire" ? unreadAttireNotifs : lfWarningCount;
+  const warnings =
+    activeModule === "attire"
+      ? unreadAttireNotifs
+      : Math.max(lfWarningCount, unreadLfNotifs);
   const offline =
     activeModule === "attire"
       ? Math.max(0, totalSources - activeSources)
@@ -859,6 +979,57 @@ export default function App() {
                 onClick={(e) => {
                   e.stopPropagation();
                   setAttireToasts((prev) => prev.filter((x) => x.id !== t.id));
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="fixed top-4 right-4 z-[9999] space-y-3 w-[24rem]">
+        {lfToasts.map((t) => (
+          <div
+            key={t.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => {
+              setCurrentPage("events");
+              localStorage.setItem("nav:lastPage", "events");
+              setLfToasts((prev) => prev.filter((x) => x.id !== t.id));
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                setCurrentPage("events");
+                localStorage.setItem("nav:lastPage", "events");
+              }
+            }}
+            className="cursor-pointer select-none bg-slate-900 border border-blue-700 rounded-lg shadow-lg p-3 hover:border-blue-500 transition"
+          >
+            <div className="flex gap-3">
+              {t.imageUrl ? (
+                <img
+                  src={t.imageUrl}
+                  alt="Lost item"
+                  className="w-16 h-16 rounded object-cover border border-slate-700 shrink-0"
+                />
+              ) : null}
+
+              <div className="min-w-0 flex-1">
+                <div className="text-white text-sm font-semibold truncate">
+                  {t.title}
+                </div>
+                <div className="text-slate-300 text-xs mt-1 line-clamp-2">
+                  {t.message}
+                </div>
+              </div>
+
+              <button
+                className="text-slate-400 hover:text-white shrink-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLfToasts((prev) => prev.filter((x) => x.id !== t.id));
                 }}
               >
                 ✕
