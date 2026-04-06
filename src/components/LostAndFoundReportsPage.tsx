@@ -157,7 +157,6 @@ async function waitForImagesToLoad(container: HTMLElement) {
     })
   );
 }
-
 function StatCard({
   title,
   value,
@@ -664,17 +663,10 @@ function LostAndFoundReportsPageInner() {
 
     // -------- Evidence page (portrait, html2canvas capture)
     if (latestEvidenceItems.length > 0 && pdfEvidenceRef.current) {
-      await waitForImagesToLoad(pdfEvidenceRef.current);
-
-      // small extra delay to let browser paint images
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
       const evidenceCanvas = await html2canvas(pdfEvidenceRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
-        allowTaint: false,
-        imageTimeout: 15000,
         windowWidth: pdfEvidenceRef.current.scrollWidth,
         windowHeight: pdfEvidenceRef.current.scrollHeight,
       });
@@ -1193,14 +1185,14 @@ function LostAndFoundReportsPageInner() {
                       alt={it.label || "Evidence"}
                       className="w-full h-full object-cover"
                       crossOrigin="anonymous"
-                      referrerPolicy="no-referrer"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.style.display = "none";
                         const parent = target.parentElement;
                         if (parent && !parent.querySelector(".evidence-fallback")) {
                           const fallback = document.createElement("div");
-                          fallback.className = "evidence-fallback text-slate-400 text-lg";
+                          fallback.className =
+                            "evidence-fallback text-slate-400 text-base";
                           fallback.textContent = "Image unavailable";
                           parent.appendChild(fallback);
                         }
