@@ -603,28 +603,6 @@ export function AttireComplianceEventsPage() {
                   loading="lazy"
                 />
 
-                <div className="absolute top-2 left-2 z-10">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleStatusToggle(violation.id);
-                    }}
-                    className={`px-2.5 py-1 rounded text-[13px] font-medium transition-colors shadow-sm ${
-                      violation.status === "Pending"
-                        ? "bg-red-500/90 text-white hover:bg-red-600"
-                        : "bg-green-500/90 text-white hover:bg-green-600"
-                    }`}
-                    title={
-                      violation.status === "Pending"
-                        ? "Click to mark as Resolved"
-                        : "Click to mark as Pending"
-                    }
-                  >
-                    {violation.status}
-                  </button>
-                </div>
-
                 <div className="absolute top-2 right-2">
                   <div className="bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded text-[13px] text-white">
                     {violation.source}
@@ -657,8 +635,35 @@ export function AttireComplianceEventsPage() {
                 </div>
 
                 {/* notes pinned bottom */}
-                <div className="mt-auto pt-2 h-[42px] text-slate-400 text-sm overflow-hidden">
-                  <p className="line-clamp-2">{violation.notes || ""}</p>
+                <div className="mt-auto pt-2 flex items-end justify-between gap-2">
+                  {/* Notes */}
+                  <div className="text-slate-400 text-sm overflow-hidden flex-1">
+                    <p className="line-clamp-2">{violation.notes || ""}</p>
+                  </div>
+
+                  {/* Status Button (BOTTOM RIGHT) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStatusToggle(violation.id);
+                    }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold shadow-md border transition-all ${
+                      violation.status === "Pending"
+                        ? "bg-red-500 text-white border-red-400/20 hover:bg-red-600"
+                        : "bg-green-500 text-white border-green-400/20 hover:bg-green-600"
+                    }`}
+                    title={
+                      violation.status === "Pending"
+                        ? "Click to mark as Resolved"
+                        : "Click to mark as Pending"
+                    }
+                  >
+                    <span className="text-[12px]">
+                      {violation.status === "Pending" ? "⏳" : "✓"}
+                    </span>
+                    {violation.status}
+                  </button>
                 </div>
               </div>
             </button>

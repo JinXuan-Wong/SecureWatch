@@ -83,6 +83,8 @@ const DailyTick = ({ x, y, payload }: any) => {
   );
 };
 
+const [trendMode, setTrendMode] = useState<"weekly" | "monthly">("weekly");
+
 export function AttireComplianceReportsPage({ canExport }: { canExport: boolean }) {
   // default last 7 days
   const [startDate, setStartDate] = useState<string>(() => toDateInputValue(new Date(Date.now() - 6 * 86400000)));
@@ -275,6 +277,60 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
 
     return out;
   }, [filtered, endDate]);
+
+  const monthlyTrendData = useMemo(() => {
+    const acc: Record<string, number> = {};
+
+    for (const e of filtered) {
+      const dt = new Date((e.ts || 0) * 1000);
+      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+      acc[key] = (acc[key] || 0) + 1;
+    }
+
+    const start = new Date(startDate);
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(endDate);
+    end.setDate(1);
+    end.setHours(0, 0, 0, 0);
+
+    const out: { month: string; violations: number }[] = [];
+    const cursor = new Date(start);
+
+    while (cursor <= end) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+      out.push({
+        month: key,
+        violations: acc[key] || 0,
+      });
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    return out;
+  }, [filtered, startDate, endDate]);
+
+  const trendChartData = trendMode === "weekly" ? dailyTrendData : monthlyTrendData;
+
+  const MonthlyTick = ({ x, y, payload }: any) => {
+    const value = String(payload.value || "");
+    const [yyyy, mm] = value.split("-");
+    const d = new Date(Number(yyyy), Number(mm) - 1, 1);
+
+    const month = d.toLocaleDateString(undefined, { month: "short" });
+    const year = yyyy;
+
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text y={0} dy={12} textAnchor="middle" fill="#94a3b8" fontSize={12}>
+          {month}
+        </text>
+        <text y={0} dy={26} textAnchor="middle" fill="#64748b" fontSize={11}>
+          {year}
+        </text>
+      </g>
+    );
+  };
 
   const statusData = [
     { name: "Resolved", value: resolvedCount, color: "#10b981" },
@@ -540,16 +596,46 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
           </div>
 
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-            <h3 className="text-white mb-4">Last 8 Days Trend</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white">
+                {trendMode === "weekly" ? "Last 8 Days Trend" : "Monthly Trend"}
+              </h3>
+
+              <div className="inline-flex rounded-lg overflow-hidden border border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setTrendMode("weekly")}
+                  className={`px-3 py-1.5 text-sm transition-colors ${
+                    trendMode === "weekly"
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  Weekly
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTrendMode("monthly")}
+                  className={`px-3 py-1.5 text-sm border-l border-slate-700 transition-colors ${
+                    trendMode === "monthly"
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  Monthly
+                </button>
+              </div>
+            </div>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={dailyTrendData}>
+              <LineChart data={trendChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis
-                  dataKey="day"
-                  tick={<DailyTick />}
+                  dataKey={trendMode === "weekly" ? "day" : "month"}
+                  tick={trendMode === "weekly" ? <DailyTick /> : <MonthlyTick />}
                   height={40}
                   interval={0}
                   minTickGap={0}
+                  stroke="#94a3b8"
                 />
                 <YAxis stroke="#94a3b8" />
                 <Tooltip
