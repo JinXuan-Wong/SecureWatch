@@ -583,12 +583,19 @@ export function AttireComplianceEventsPage() {
           }}
         >
           {filteredViolations.map((violation) => (
-            <button
+            <div
               key={violation.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => setSelectedViolation(violation)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedViolation(violation);
+                }
+              }}
               className="w-full min-w-0 h-[340px] text-left bg-slate-900/50 border border-slate-800 rounded-lg overflow-hidden
-                          hover:border-blue-500 transition-colors flex flex-col"
+                          hover:border-blue-500 transition-colors flex flex-col cursor-pointer"
             >
               {/* fixed image height */}
               <div
@@ -666,7 +673,7 @@ export function AttireComplianceEventsPage() {
                   </button>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       </div>

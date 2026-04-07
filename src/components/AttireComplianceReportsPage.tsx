@@ -83,12 +83,11 @@ const DailyTick = ({ x, y, payload }: any) => {
   );
 };
 
-const [trendMode, setTrendMode] = useState<"weekly" | "monthly">("weekly");
-
 export function AttireComplianceReportsPage({ canExport }: { canExport: boolean }) {
   // default last 7 days
   const [startDate, setStartDate] = useState<string>(() => toDateInputValue(new Date(Date.now() - 6 * 86400000)));
   const [endDate, setEndDate] = useState<string>(() => toDateInputValue(new Date()));
+  const [trendMode, setTrendMode] = useState<"weekly" | "monthly">("weekly");
   const reportHeaderRef = useRef<HTMLDivElement | null>(null);
   const chartsRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLDivElement | null>(null);
