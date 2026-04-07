@@ -645,7 +645,18 @@ export function AttireComplianceReportsPage({ canExport }: { canExport: boolean 
                             alt={titleCaseViolation(e.label)}
                             className="w-full h-full object-cover"
                             loading="lazy"
-                            crossOrigin="anonymous"
+                            onError={(ev) => {
+                              const img = ev.currentTarget;
+                              img.style.display = "none";
+                              const holder = img.parentElement;
+                              if (holder && !holder.querySelector(".thumb-fallback")) {
+                                const div = document.createElement("div");
+                                div.className =
+                                  "thumb-fallback w-full h-full flex items-center justify-center text-slate-500 text-[10px]";
+                                div.textContent = "No Image";
+                                holder.appendChild(div);
+                              }
+                            }}
                           />
                         </a>
                       ) : (
