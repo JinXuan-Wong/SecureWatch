@@ -209,10 +209,21 @@ function MjpegStream({
   onReload: () => void;
 }) {
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const retryTimerRef = useRef<number | null>(null);
+  const failCountRef = useRef(0);
+
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
 
   useEffect(() => {
     setHasFirstFrame(false);
+    setShowWarning(false);
+    failCountRef.current = 0;
+
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
   }, [src]);
 
   useEffect(() => {
@@ -221,19 +232,65 @@ function MjpegStream({
     const t = window.setInterval(() => {
       const img = imgRef.current;
       if (!img) return;
+
       if (img.naturalWidth > 0 && img.naturalHeight > 0) {
         setHasFirstFrame(true);
+        setShowWarning(false);
+        failCountRef.current = 0;
+
+        if (retryTimerRef.current !== null) {
+          window.clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
       }
     }, 250);
 
     return () => window.clearInterval(t);
   }, [src, isTabVisible]);
 
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const scheduleReload = () => {
+    if (!isTabVisible) return;
+    if (retryTimerRef.current !== null) return; // prevent stacked retries
+
+    failCountRef.current += 1;
+
+    const delay =
+      failCountRef.current <= 2
+        ? 1500
+        : failCountRef.current <= 5
+        ? 4000
+        : 8000;
+
+    if (failCountRef.current >= 2) {
+      setShowWarning(true);
+    }
+
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      onReload();
+    }, delay);
+  };
+
   return (
     <div className="absolute inset-0">
-      {!hasFirstFrame && (
+      {!hasFirstFrame && !showWarning && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-950 text-slate-400 text-sm z-10">
           Connecting...
+        </div>
+      )}
+
+      {!hasFirstFrame && showWarning && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-slate-300 text-sm z-20 px-4 text-center">
+          Stream reconnecting… max 4 active streams may already be in use
         </div>
       )}
 
@@ -242,10 +299,19 @@ function MjpegStream({
         src={src}
         alt={alt}
         className={`absolute inset-0 w-full h-full object-cover ${hasFirstFrame ? "opacity-100" : "opacity-0"} ${className || ""}`}
-        onLoad={() => setHasFirstFrame(true)}
+        onLoad={() => {
+          setHasFirstFrame(true);
+          setShowWarning(false);
+          failCountRef.current = 0;
+
+          if (retryTimerRef.current !== null) {
+            window.clearTimeout(retryTimerRef.current);
+            retryTimerRef.current = null;
+          }
+        }}
         onError={() => {
-          if (!isTabVisible) return;
-          window.setTimeout(onReload, 800);
+          setHasFirstFrame(false);
+          scheduleReload();
         }}
       />
     </div>
@@ -1032,7 +1098,15 @@ export function AttireComplianceLiveView() {
     };
   }, []);
 
+  const reloadLockRef = useRef<Record<string, number>>({});
   const handleReload = useCallback((id: string) => {
+    const now = Date.now();
+    const last = reloadLockRef.current[id] ?? 0;
+
+    if (now - last < 3000) return; // 3s cooldown per source
+
+    reloadLockRef.current[id] = now;
+
     setStreamReload((prev) => ({
       ...prev,
       [id]: (prev[id] ?? 0) + 1,
