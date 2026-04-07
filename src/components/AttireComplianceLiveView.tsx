@@ -210,13 +210,9 @@ function MjpegStream({
 }) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
-  const [loadError, setLoadError] = useState(false);
-  const [connectTimedOut, setConnectTimedOut] = useState(false);
 
   useEffect(() => {
     setHasFirstFrame(false);
-    setLoadError(false);
-    setConnectTimedOut(false);
   }, [src]);
 
   useEffect(() => {
@@ -227,46 +223,17 @@ function MjpegStream({
       if (!img) return;
       if (img.naturalWidth > 0 && img.naturalHeight > 0) {
         setHasFirstFrame(true);
-        setLoadError(false);
-        setConnectTimedOut(false);
       }
     }, 250);
 
     return () => window.clearInterval(t);
   }, [src, isTabVisible]);
 
-  useEffect(() => {
-    if (!isTabVisible) return;
-    if (hasFirstFrame || loadError) return;
-
-    const timeoutId = window.setTimeout(() => {
-      setConnectTimedOut(true);
-    }, 8000);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [src, isTabVisible, hasFirstFrame, loadError]);
-
-  const showConnecting = !hasFirstFrame && !loadError && !connectTimedOut;
-  const showError = !hasFirstFrame && (loadError || connectTimedOut);
-
   return (
     <div className="absolute inset-0">
-      {showConnecting && (
+      {!hasFirstFrame && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-950 text-slate-400 text-sm z-10">
           Connecting...
-        </div>
-      )}
-
-      {showError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 text-slate-300 text-sm z-20 gap-3 px-4 text-center">
-          <div>Stream unavailable or max 4 active streams reached</div>
-          <button
-            type="button"
-            onClick={onReload}
-            className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 transition-colors"
-          >
-            Retry
-          </button>
         </div>
       )}
 
@@ -275,15 +242,10 @@ function MjpegStream({
         src={src}
         alt={alt}
         className={`absolute inset-0 w-full h-full object-cover ${hasFirstFrame ? "opacity-100" : "opacity-0"} ${className || ""}`}
-        onLoad={() => {
-          setHasFirstFrame(true);
-          setLoadError(false);
-          setConnectTimedOut(false);
-        }}
+        onLoad={() => setHasFirstFrame(true)}
         onError={() => {
           if (!isTabVisible) return;
-          setLoadError(true);
-          setHasFirstFrame(false);
+          window.setTimeout(onReload, 800);
         }}
       />
     </div>
