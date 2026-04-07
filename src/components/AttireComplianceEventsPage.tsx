@@ -431,7 +431,7 @@ export function AttireComplianceEventsPage() {
               ...updatedViolation,
               videoName: nextVideoName,
               view: nextView,
-              location: nextVideoName ? `${nextVideoName}, ${nextView}` : nextView,
+              location: rawLocation || (nextVideoName ? `${nextVideoName}, ${nextView}` : nextView),
             }
           : v
       )
@@ -443,7 +443,7 @@ export function AttireComplianceEventsPage() {
             ...updatedViolation,
             videoName: nextVideoName,
             view: nextView,
-            location: nextVideoName ? `${nextVideoName}, ${nextView}` : nextView,
+            location: rawLocation || (nextVideoName ? `${nextVideoName}, ${nextView}` : nextView),
           }
         : s
     );
@@ -455,6 +455,7 @@ export function AttireComplianceEventsPage() {
         label: nextLabel,
         video_name: nextVideoName,
         view: nextView,
+        location: rawLocation || (nextVideoName ? `${nextVideoName}, ${nextView}` : nextView),
       });
     } catch (e) {
       alert((e as any)?.message || "Failed to save edit to backend");
