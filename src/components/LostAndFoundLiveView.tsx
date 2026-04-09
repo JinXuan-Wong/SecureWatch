@@ -259,7 +259,7 @@ function StatusStrip({
       </div>
 
       <div className="flex items-center gap-6">
-        <span>FPS: ~12</span>
+        <span>FPS: ~ 4.0</span>
         {!videoEnded && (
           <>
             <span>Mode: {detectionEnabled ? "Detection" : "Display Only"}</span>
