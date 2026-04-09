@@ -197,6 +197,21 @@ async function fetchOfflineSources(): Promise<UnifiedSource[]> {
   }));
 }
 
+async function closePreviewSourceSafe(id: string, kind: SourceKind) {
+  if (!id) return;
+
+  try {
+    const closeUrl =
+      kind === "rtsp"
+        ? `${API_BASE}/api/rtsp/close/${encodeURIComponent(id)}`
+        : `${API_BASE}/api/offline/close/${encodeURIComponent(id)}`;
+
+    await fetch(closeUrl, { method: "POST" });
+  } catch {
+    // ignore
+  }
+}
+
 export function AttireComplianceSettingsPage() {
   const [activeTab, setActiveTab] = useState<
     "sources" | "roi" | "timing" | "violations" | "notifications" | "retention"
@@ -604,23 +619,23 @@ export function AttireComplianceSettingsPage() {
     })();
   }, [selectedCamera, isMosaic]);
 
-  const prevSourceRef = useRef<{ id: string; kind: SourceKind } | null>(null);
+  const handleSelectSettingsSource = async (nextId: string) => {
+    if (!nextId) return;
+    if (nextId === selectedCamera) return;
 
-  useEffect(() => {
-    const prev = prevSourceRef.current;
-    if (prev && prev.id !== selectedCamera) {
-      const closeUrl =
-        prev.kind === "rtsp"
-          ? `${API_BASE}/api/rtsp/close/${prev.id}`
-          : `${API_BASE}/api/offline/close/${prev.id}`;
+    const prev = videoSources.find((s) => s.id === selectedCamera);
+    const next = videoSources.find((s) => s.id === nextId);
 
-      fetch(closeUrl, { method: "POST" }).catch(() => {});
+    if (prev) {
+      closePreviewSourceSafe(prev.id, prev.kind).catch(() => {});
     }
 
-    prevSourceRef.current = selectedCamera
-      ? { id: selectedCamera, kind: selectedKind }
-      : null;
-  }, [selectedCamera, selectedKind]);
+    if (next) {
+      setSelectedKind(next.kind);
+    }
+
+    setSelectedCamera(nextId);
+  };
 
   function clampNum(v: number, min: number, max: number) {
     return Math.max(min, Math.min(max, v));
@@ -1688,7 +1703,7 @@ export function AttireComplianceSettingsPage() {
                 <label className="block text-slate-400 text-sm mb-2">Select Camera</label>
                 <select
                   value={selectedCamera}
-                  onChange={(e) => setSelectedCamera(e.target.value)}
+                  onChange={(e) => handleSelectSettingsSource(e.target.value)}
                   className="w-full max-w-md bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
                 >
                   {videoSources.length === 0 ? (

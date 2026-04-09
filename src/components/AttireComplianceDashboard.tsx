@@ -64,6 +64,21 @@ async function setSourceEnabled(videoId: string, enabled: boolean) {
   return data;
 }
 
+async function closeSourceSafe(source: SourceItem | undefined) {
+  if (!source?.id) return;
+
+  try {
+    const closeUrl =
+      source.kind === "rtsp"
+        ? `${API_BASE}/api/rtsp/close/${encodeURIComponent(source.id)}`
+        : `${API_BASE}/api/offline/close/${encodeURIComponent(source.id)}`;
+
+    await fetch(closeUrl, { method: "POST" });
+  } catch {
+    // ignore close failure so UI won't block
+  }
+}
+
 function StatCard({
   icon,
   label,
@@ -271,6 +286,25 @@ export function AttireDashboard({
     if (floorFilter === "ALL") return true;
     const key = `${s.name || ""} ${s.id || ""}`;
     return getFloorFromName(key) === floorFilter;
+  };
+
+  const handleSelectCameraSafe = async (nextId: string) => {
+    if (!nextId) return;
+    if (nextId === selectedCamera) {
+      onSelectCamera(nextId);
+      return;
+    }
+
+    const prevSource = sources.find((s) => s.id === selectedCamera);
+    const nextSource = sources.find((s) => s.id === nextId);
+
+    // Only close old source if it is a different source
+    if (prevSource && nextSource && prevSource.id !== nextSource.id) {
+      closeSourceSafe(prevSource).catch(() => {});
+    }
+
+    // Immediately switch selection so UI does not blank out
+    onSelectCamera(nextId);
   };
 
   const DASHBOARD_THUMB_INTERVAL_MS = 10000; // refresh every 10 sec
@@ -609,7 +643,7 @@ export function AttireDashboard({
                     selected={selectedCamera === s.id}
                     enabled={enabledMap[s.id] ?? true}
                     thumbUrl={getThumbUrl(s, idx < MAX_ACTIVE_THUMBS)}
-                    onClick={() => onSelectCamera(s.id)}
+                    onClick={() => handleSelectCameraSafe(s.id)}
                     onToggleEnabled={() => toggleEnabledFromTile(s.id)}
                   />
                 ))}
