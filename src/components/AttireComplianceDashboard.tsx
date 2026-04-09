@@ -64,21 +64,6 @@ async function setSourceEnabled(videoId: string, enabled: boolean) {
   return data;
 }
 
-async function closeSourceSafe(source: SourceItem | undefined) {
-  if (!source?.id) return;
-
-  try {
-    const closeUrl =
-      source.kind === "rtsp"
-        ? `${API_BASE}/api/rtsp/close/${encodeURIComponent(source.id)}`
-        : `${API_BASE}/api/offline/close/${encodeURIComponent(source.id)}`;
-
-    await fetch(closeUrl, { method: "POST" });
-  } catch {
-    // ignore close failure so UI won't block
-  }
-}
-
 function StatCard({
   icon,
   label,
@@ -288,22 +273,10 @@ export function AttireDashboard({
     return getFloorFromName(key) === floorFilter;
   };
 
-  const handleSelectCameraSafe = async (nextId: string) => {
+  const handleSelectCameraSafe = (nextId: string) => {
     if (!nextId) return;
-    if (nextId === selectedCamera) {
-      onSelectCamera(nextId);
-      return;
-    }
+    if (nextId === selectedCamera) return;
 
-    const prevSource = sources.find((s) => s.id === selectedCamera);
-    const nextSource = sources.find((s) => s.id === nextId);
-
-    // Only close old source if it is a different source
-    if (prevSource && nextSource && prevSource.id !== nextSource.id) {
-      closeSourceSafe(prevSource).catch(() => {});
-    }
-
-    // Immediately switch selection so UI does not blank out
     onSelectCamera(nextId);
   };
 

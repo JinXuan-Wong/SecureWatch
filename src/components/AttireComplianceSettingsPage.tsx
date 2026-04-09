@@ -627,7 +627,19 @@ export function AttireComplianceSettingsPage() {
     const next = videoSources.find((s) => s.id === nextId);
 
     if (prev) {
-      closePreviewSourceSafe(prev.id, prev.kind).catch(() => {});
+      let activeIds: string[] = [];
+      try {
+        activeIds = JSON.parse(localStorage.getItem("attire:enabledCameraIds") || "[]");
+        if (!Array.isArray(activeIds)) activeIds = [];
+      } catch {
+        activeIds = [];
+      }
+
+      const prevIsStillInLiveView = activeIds.includes(prev.id);
+
+      if (!prevIsStillInLiveView) {
+        closePreviewSourceSafe(prev.id, prev.kind).catch(() => {});
+      }
     }
 
     if (next) {
