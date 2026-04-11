@@ -17,6 +17,8 @@ import {
   resolveLostFoundUrl,
 } from "../api/base";
 
+const MAX_VISIBLE_ITEMS = 300;
+
 type LostFoundItem = {
   id: string;
   module?: string;
@@ -58,52 +60,78 @@ function isSolved(x: LostFoundItem) {
   return (x.status || "").toLowerCase().includes("solv");
 }
 
+function getItemSortTs(it: any): number {
+  const rawTs =
+    it?.lastSeenTs ??
+    it?.last_seen_ts ??
+    it?.firstSeenTs ??
+    it?.first_seen_ts ??
+    it?.updatedAt ??
+    it?.updated_at ??
+    0;
+
+  const t = Number(rawTs || 0);
+  if (!t) return 0;
+
+  return t > 2_000_000_000_000 ? t : t * 1000;
+}
+
 async function apiGetItems(signal?: AbortSignal): Promise<LostFoundItem[]> {
   const res = await fetch(buildApiUrl(LOSTFOUND_API_BASE, "/api/lostfound/items"), {
     signal,
     cache: "no-store",
   });
   if (!res.ok) throw new Error("Failed to load items");
+
   const js = await res.json();
-  const items: LostFoundItem[] = Array.isArray(js?.items)
+  const rawItems: any[] = Array.isArray(js?.items)
     ? js.items
     : Array.isArray(js)
     ? js
     : [];
 
-  return items
-    .filter((it) => it && typeof it === "object" && (it as any).id != null)
-    .map((it: any) => ({
-      ...it,
-      id: String(it.id),
-      label: it.label ? String(it.label) : "Unknown",
-      location: it.location ? String(it.location) : "Unknown",
-      status: (it.status || "lost") as any,
-      source: it.source ? String(it.source) : "unknown",
-      cameraId: it.cameraId ?? it.camera_id ?? undefined,
-      videoId: it.videoId ?? it.video_id ?? undefined,
-      firstSeenTs:
-        typeof it.firstSeenTs === "number"
-          ? it.firstSeenTs
-          : typeof it.first_seen_ts === "number"
-          ? it.first_seen_ts
-          : undefined,
-      lastSeenTs:
-        typeof it.lastSeenTs === "number"
-          ? it.lastSeenTs
-          : typeof it.last_seen_ts === "number"
-          ? it.last_seen_ts
-          : undefined,
-      updatedAt:
-        typeof it.updatedAt === "number"
-          ? it.updatedAt
-          : typeof it.updated_at === "number"
-          ? it.updated_at
-          : undefined,
-      imageUrl: resolveLostFoundUrl(it.imageUrl || it.image_url || null),
-      notes: it.notes ?? "",
-      raw: it,
-    }));
+  return rawItems
+    .filter((it) => it && typeof it === "object" && it.id != null)
+    .sort((a, b) => getItemSortTs(b) - getItemSortTs(a))
+    .slice(0, MAX_VISIBLE_ITEMS)
+    .map((it: any) => {
+      const rawImageUrl = it.imageUrl ?? it.image_url ?? null;
+
+      return {
+        ...it,
+        id: String(it.id),
+        label: it.label ? String(it.label) : "Unknown",
+        location: it.location ? String(it.location) : "Unknown",
+        status: (it.status || "lost") as any,
+        source: it.source ? String(it.source) : "unknown",
+        cameraId: it.cameraId ?? it.camera_id ?? undefined,
+        videoId: it.videoId ?? it.video_id ?? undefined,
+        firstSeenTs:
+          typeof it.firstSeenTs === "number"
+            ? it.firstSeenTs
+            : typeof it.first_seen_ts === "number"
+            ? it.first_seen_ts
+            : undefined,
+        lastSeenTs:
+          typeof it.lastSeenTs === "number"
+            ? it.lastSeenTs
+            : typeof it.last_seen_ts === "number"
+            ? it.last_seen_ts
+            : undefined,
+        updatedAt:
+          typeof it.updatedAt === "number"
+            ? it.updatedAt
+            : typeof it.updated_at === "number"
+            ? it.updated_at
+            : undefined,
+        imageUrl:
+          typeof rawImageUrl === "string" && rawImageUrl.trim()
+            ? resolveLostFoundUrl(rawImageUrl.trim())
+            : null,
+        notes: it.notes ?? "",
+        raw: it,
+      };
+    });
 }
 
 async function apiGetRetentionSettings(): Promise<LostFoundRetentionSettings> {
@@ -285,6 +313,8 @@ export default function LostAndFoundEventsPage() {
   const [notesItem, setNotesItem] = useState<LostFoundItem | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
 
+  const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
+
   const abortRef = useRef<AbortController | null>(null);
 
   async function loadRetentionSettings() {
@@ -315,6 +345,16 @@ export default function LostAndFoundEventsPage() {
     try {
       const data = await apiGetItems(ac.signal);
       setItems(data);
+
+      setBrokenImages((prev) => {
+        const visibleIds = new Set(data.map((x) => x.id));
+        const next: Record<string, boolean> = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (visibleIds.has(k)) next[k] = v;
+        }
+        return next;
+      });
+
       await loadRetentionSettings();
     } catch (e: any) {
       if (String(e?.name || "") !== "AbortError") {
@@ -488,7 +528,7 @@ export default function LostAndFoundEventsPage() {
 
   function openImage(it: LostFoundItem) {
     const url = String(it.imageUrl || "");
-    if (!url) return;
+    if (!url || brokenImages[it.id]) return;
     setImgUrl(url);
     setImgTitle(`${it.label || "Evidence"} • ${it.location || ""}`);
     setZoom(2);
@@ -509,7 +549,7 @@ export default function LostAndFoundEventsPage() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search (id / label / location / cameraId / notes...)"
+                placeholder={`Search within latest ${MAX_VISIBLE_ITEMS} items (id / label / location / cameraId / notes...)`}
                 className="w-full pl-10 pr-4 py-2.5 rounded-full bg-[#0b1220] ring-1 ring-white/10 focus:ring-white/20 outline-none text-sm placeholder:text-slate-500"
               />
             </div>
@@ -627,9 +667,10 @@ export default function LostAndFoundEventsPage() {
           </div>
 
           <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <Chip>{counts.total} items</Chip>
+            <Chip>{counts.total} visible items</Chip>
             <Chip tone="red">{counts.lost} lost</Chip>
             <Chip tone="green">{counts.solved} solved</Chip>
+            <Chip>Window: latest {MAX_VISIBLE_ITEMS}</Chip>
 
             <Chip>
               Retention:{" "}
@@ -665,6 +706,7 @@ export default function LostAndFoundEventsPage() {
         <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((it) => {
             const statusLost = isLost(it);
+            const canShowImage = !!it.imageUrl && !brokenImages[it.id];
 
             return (
               <div
@@ -674,17 +716,19 @@ export default function LostAndFoundEventsPage() {
                 <div className="flex gap-4 p-5">
                   <div className="w-44 shrink-0">
                     <div className="relative w-44 h-28 rounded-2xl bg-[#07101f] ring-1 ring-white/10 overflow-hidden flex items-center justify-center">
-                      {it.imageUrl ? (
+                      {canShowImage ? (
                         <>
                           <img
-                            src={it.imageUrl}
+                            src={it.imageUrl as string}
                             className="w-full h-full object-contain"
                             alt={it.label || "evidence"}
                             loading="lazy"
                             decoding="async"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display =
-                                "none";
+                            onError={() => {
+                              setBrokenImages((prev) => ({
+                                ...prev,
+                                [it.id]: true,
+                              }));
                             }}
                           />
                           <button
