@@ -498,7 +498,7 @@ export default function LostAndFoundEventsPage() {
   }
 
   async function onDelete(it: LostFoundItem) {
-    const ok = confirm("Delete this item from Reports? (It will be hidden)");
+    const ok = confirm("Hide this item from the Events page? It will remain in history for reports.");
     if (!ok) return;
     try {
       await apiDelete(it.id);
