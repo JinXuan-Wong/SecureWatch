@@ -4,6 +4,8 @@ SecureWatch is a web-based CCTV monitoring dashboard designed to provide real-ti
 
 🔗 **Live Demo:** 
 
+https://tarumtfocslab.github.io/SecureWatch/
+
 https://jinxuan-wong.github.io/SecureWatch/
 
 https://qy248.github.io/SecureWatch/
