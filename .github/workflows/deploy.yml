@@ -34,8 +34,6 @@ jobs:
 
       - name: Build
         run: npm run build
-        env:
-          APP_BASE: /SecureWatch/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
