@@ -382,13 +382,15 @@ function LostAndFoundReportsPageInner() {
   }, [items, q, statusFilter, sourceFilter]);
 
   const summary = useMemo(() => {
-    const lost = filtered.filter(isLost).length;
-    const solved = filtered.filter(isSolved).length;
+    const active = filtered.filter((it) => !String(it.status || "").toLowerCase().includes("delete"));
+    const lost = active.filter(isLost).length;
+    const solved = active.filter(isSolved).length;
+
     return {
-      total: filtered.length,
+      total: lost + solved,
       lost,
       solved,
-      rate: filtered.length ? ((solved / filtered.length) * 100).toFixed(1) : "0.0",
+      rate: lost + solved ? ((solved / (lost + solved)) * 100).toFixed(1) : "0.0",
     };
   }, [filtered]);
 
