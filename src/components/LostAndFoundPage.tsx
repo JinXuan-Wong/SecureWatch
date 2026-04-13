@@ -427,16 +427,7 @@ export default function LostAndFoundEventsPage() {
             ? it.raw.updated_at
             : undefined);
 
-        if (typeof tsRaw === "number" && tsRaw > 0) {
-          // only apply retention for real epoch timestamps
-          const looksLikeEpochSeconds = tsRaw >= 1_700_000_000;
-          const looksLikeEpochMs = tsRaw >= 1_700_000_000_000;
-
-          if (looksLikeEpochSeconds || looksLikeEpochMs) {
-            const tsMs = looksLikeEpochMs ? tsRaw : tsRaw * 1000;
-            if (tsMs < cutoffMs) return false;
-          }
-        }
+     
       }
 
       if (statusFilter === "lost" && !isLost(it)) return false;
