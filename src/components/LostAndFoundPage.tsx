@@ -45,11 +45,16 @@ function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
 
-function fmtTs(ts?: number) {
+function fmtTs(ts?: number, it?: any) {
   const t = Number(ts || 0);
-  if (!t) return "-";
-  const ms = t > 2_000_000_000_000 ? t : t * 1000;
-  return new Date(ms).toLocaleString();
+
+  if (t >= 2_000_000_000_000) return new Date(t).toLocaleString();
+  if (t >= 1_700_000_000) return new Date(t * 1000).toLocaleString();
+
+  const snapMs = extractSnapshotEpoch(it);
+  if (snapMs > 0) return new Date(snapMs).toLocaleString();
+
+  return "-";
 }
 
 function isLost(x: LostFoundItem) {
@@ -810,13 +815,13 @@ const counts = useMemo(() => {
                       <div className="rounded-2xl bg-[#0b1220]/70 ring-1 ring-white/10 px-4 py-3">
                         <div className="text-xs text-slate-400">First Seen</div>
                         <div className="text-slate-200">
-                          {fmtTs(it.firstSeenTs)}
+                          {fmtTs(it.firstSeenTs, it)}
                         </div>
                       </div>
                       <div className="rounded-2xl bg-[#0b1220]/70 ring-1 ring-white/10 px-4 py-3">
                         <div className="text-xs text-slate-400">Last Seen</div>
                         <div className="text-slate-200">
-                          {fmtTs(it.lastSeenTs)}
+                          {fmtTs(it.lastSeenTs, it)}
                         </div>
                       </div>
                     </div>
