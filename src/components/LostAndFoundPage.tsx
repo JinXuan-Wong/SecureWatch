@@ -71,9 +71,46 @@ function getItemSortTs(it: any): number {
     0;
 
   const t = Number(rawTs || 0);
-  if (!t) return 0;
 
-  return t > 2_000_000_000_000 ? t : t * 1000;
+  // keep only clearly real timestamps
+  if (t >= 2_000_000_000_000) return t;
+  if (t >= 1_700_000_000) return t * 1000;
+
+  // fallback to snapshot filename datetime
+  const snapMs = extractSnapshotEpoch(it);
+  if (snapMs > 0) return snapMs;
+
+  // last fallback only
+  return t > 0 ? t * 1000 : 0;
+}
+
+function extractSnapshotEpoch(it: any): number {
+  const src =
+    String(
+      it?.snapshot ||
+      it?.snapshot_path ||
+      it?.image_path ||
+      it?.imageUrl ||
+      it?.image_url ||
+      ""
+    );
+
+  const m = src.match(/_(\d{8})_(\d{6})_/);
+  if (!m) return 0;
+
+  const ymd = m[1];
+  const hms = m[2];
+
+  const yyyy = Number(ymd.slice(0, 4));
+  const mm = Number(ymd.slice(4, 6)) - 1;
+  const dd = Number(ymd.slice(6, 8));
+  const hh = Number(hms.slice(0, 2));
+  const mi = Number(hms.slice(2, 4));
+  const ss = Number(hms.slice(4, 6));
+
+  const dt = new Date(yyyy, mm, dd, hh, mi, ss);
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 async function apiGetItems(signal?: AbortSignal): Promise<LostFoundItem[]> {
