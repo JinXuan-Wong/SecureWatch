@@ -284,21 +284,7 @@ export function UploadVideoPage({
     localStorage.setItem("lostfound:offlineStem", cleanStem);
     localStorage.setItem("lostfound:roiOfflineStem", cleanStem);
 
-    const targetUrl = `/lostfound/settings?tab=roi&offline=${encodeURIComponent(cleanStem)}#roi`;
-
-    console.log("[OPEN SETTINGS] stem =", cleanStem);
-    console.log("[OPEN SETTINGS] callback exists =", !!onOpenLostFoundSettings);
-    console.log("[OPEN SETTINGS] url =", targetUrl);
-
-    // still notify parent if needed
-    try {
-      onOpenLostFoundSettings?.(cleanStem);
-    } catch (e) {
-      console.warn("[OPEN SETTINGS] callback error:", e);
-    }
-
-    // always navigate to ROI section
-    nav(targetUrl);
+    nav(`/lostfound/settings?tab=roi&offline=${encodeURIComponent(cleanStem)}#roi`);
   };
 
   useEffect(() => {
