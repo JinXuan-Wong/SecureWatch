@@ -369,6 +369,7 @@ function LostAndFoundReportsPageInner() {
     items.forEach((it) => s.add((it.source || "unknown").toLowerCase()));
     return ["all", ...Array.from(s).sort()];
   }, [items]);
+  
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -389,6 +390,11 @@ function LostAndFoundReportsPageInner() {
       return text.includes(qq);
     });
   }, [items, q, statusFilter, sourceFilter]);
+
+  // ADD THIS LINE HERE:
+  const activeItems = useMemo(() => {
+    return filtered.filter((it) => !isDeleted(it));
+  }, [filtered]);
 
   const summary = useMemo(() => {
     // First filter out deleted items completely
@@ -469,7 +475,9 @@ function LostAndFoundReportsPageInner() {
     let cancelled = false;
 
     async function buildPdfEvidenceImages() {
-      const evidenceItems = filtered.filter((it) => !!it.imageUrl).slice(0, 6);
+      const evidenceItems = filtered
+        .filter((it) => !isDeleted(it) && !!it.imageUrl)
+        .slice(0, 6);
 
       const entries = await Promise.all(
         evidenceItems.map(async (it) => {
@@ -499,6 +507,7 @@ function LostAndFoundReportsPageInner() {
 
   function exportCSV() {
     const generatedAt = new Date().toLocaleString();
+    const activeForExport = filtered.filter((it) => !isDeleted(it));
 
     const headers = [
       "Event ID",
@@ -512,7 +521,7 @@ function LostAndFoundReportsPageInner() {
       "Image URL",
     ];
 
-    const rows = filtered.map((it) => [
+    const rows = activeForExport.map((it) => [
       it.id,
       it.label || "",
       it.location || "",
@@ -527,7 +536,7 @@ function LostAndFoundReportsPageInner() {
     const metaRows = [
       ["Report Generated", generatedAt],
       ["Module", "Lost & Found"],
-      ["Total Records", String(filtered.length)],
+      ["Total Records", String(activeForExport.length)],
       ["Status Filter", statusFilter],
       ["Source Filter", sourceFilter],
       ["Search Query", q || "-"],
@@ -691,7 +700,7 @@ function LostAndFoundReportsPageInner() {
       pdf.line(8, lH - 10, lW - 8, lH - 10);
       pdf.setFontSize(8);
       pdf.setTextColor(100, 116, 139);
-      pdf.text("SecureWatch Pro v2.0", 10, lH - 5);
+      pdf.text("SecureWatch", 10, lH - 5);
       pdf.text(`Page ${pageNo}`, lW - 10, lH - 5, { align: "right" });
     };
 
@@ -863,8 +872,13 @@ function LostAndFoundReportsPageInner() {
             </select>
           </div>
 
-          <div className="mt-3 text-xs text-slate-400">
-            Showing <span className="text-slate-200 font-semibold">{filtered.length}</span> items
+         <div className="mt-3 text-xs text-slate-400">
+            Showing <span className="text-slate-200 font-semibold">{activeItems.length}</span> items
+            {filtered.length !== activeItems.length && (
+              <span className="text-slate-500 ml-2">
+                (excluding {filtered.length - activeItems.length} deleted)
+              </span>
+            )}
           </div>
         </div>
 
