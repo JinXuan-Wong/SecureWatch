@@ -24,7 +24,6 @@ type UploadedVideo = {
   status: VideoStatus;
   backendPath?: string;
 
-  // lostfound-specific
   error?: string | null;
   h264_ready?: boolean;
   h264_name?: string;
@@ -269,19 +268,27 @@ export function UploadVideoPage({
     const cleanStem = String(stem || "").trim();
     if (!cleanStem) return;
 
-    // Help Settings page know it should open ROI tab/section
     localStorage.setItem("lostfound:settingsTab", "roi");
     localStorage.setItem("lostfound:offlineStem", cleanStem);
     localStorage.setItem("lostfound:roiOfflineStem", cleanStem);
 
-    if (onOpenLostFoundSettings) {
-      onOpenLostFoundSettings(cleanStem);
-      return;
+    const targetUrl = `/lostfound/settings?tab=roi&offline=${encodeURIComponent(cleanStem)}#roi`;
+
+    console.log("[OPEN SETTINGS] stem =", cleanStem);
+    console.log("[OPEN SETTINGS] callback exists =", !!onOpenLostFoundSettings);
+    console.log("[OPEN SETTINGS] url =", targetUrl);
+
+    // still notify parent if needed
+    try {
+      onOpenLostFoundSettings?.(cleanStem);
+    } catch (e) {
+      console.warn("[OPEN SETTINGS] callback error:", e);
     }
 
-    nav(`/lostfound/settings?tab=roi&offline=${encodeURIComponent(cleanStem)}#roi`);
+    // always navigate to ROI section
+    nav(targetUrl);
   };
-  
+
   useEffect(() => {
     localStorage.setItem(MODE_STORAGE_KEY, mode);
   }, [mode]);
@@ -361,14 +368,12 @@ export function UploadVideoPage({
       setUploadedVideos(normalizeVideos(targetMode, data));
     } catch (err) {
       console.error("[REFRESH] error =", err);
-      setUploadedVideos([]);
+      // IMPORTANT: keep current list, do not clear it
     }
   };
 
   useEffect(() => {
     let cancelled = false;
-
-    setUploadedVideos([]);
 
     const run = async () => {
       try {
@@ -387,7 +392,7 @@ export function UploadVideoPage({
         }
       } catch (err) {
         console.error("[REFRESH] error =", err);
-        if (!cancelled) setUploadedVideos([]);
+        // IMPORTANT: keep current list, do not clear it
       }
     };
 
@@ -509,6 +514,8 @@ export function UploadVideoPage({
         )
       );
 
+      // let backend manifest settle a bit before full refresh
+      await sleep(700);
       await refreshVideos(uploadMode);
 
       if (uploadMode === "lost-found") {
