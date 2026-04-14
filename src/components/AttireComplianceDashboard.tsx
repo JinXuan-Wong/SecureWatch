@@ -269,7 +269,7 @@ export function AttireDashboard({
 
   const matchesFloor = (s: SourceItem) => {
     if (floorFilter === "ALL") return true;
-    const key = `${s.name || ""} ${s.id || ""}`;
+    const key = `${s.name || ""}`; 
     return getFloorFromName(key) === floorFilter;
   };
 
