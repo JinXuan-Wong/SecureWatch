@@ -11,6 +11,12 @@ import {
 } from "lucide-react";
 import { ATTIRE_API_BASE, LOSTFOUND_API_BASE } from "../api/base";
 
+const ATTIRE_UPLOAD_LOCAL_BASE =
+  import.meta.env.VITE_ATTIRE_UPLOAD_LOCAL_BASE || "http://127.0.0.1:8001";
+
+const LOSTFOUND_UPLOAD_LOCAL_BASE =
+  import.meta.env.VITE_LOSTFOUND_UPLOAD_LOCAL_BASE || "http://127.0.0.1:8000";
+
 type AnalysisMode = "lost-found" | "attire";
 type VideoStatus = "processing" | "ready" | "failed" | "queued";
 type AnalysisStatus = "queued" | "processing" | "done" | "failed" | null | undefined;
@@ -40,6 +46,12 @@ interface UploadVideoPageProps {
 
 function getApiBase(mode: AnalysisMode) {
   return mode === "attire" ? ATTIRE_API_BASE : LOSTFOUND_API_BASE;
+}
+
+function getUploadApiBase(mode: AnalysisMode) {
+  return mode === "attire"
+    ? ATTIRE_UPLOAD_LOCAL_BASE
+    : LOSTFOUND_UPLOAD_LOCAL_BASE;
 }
 
 function getDeleteUrl(mode: AnalysisMode, videoId: string) {
@@ -90,7 +102,7 @@ async function fetchWithTimeout(
 }
 
 async function uploadToBackend(file: File, mode: AnalysisMode) {
-  const API_BASE = getApiBase(mode);
+  const API_BASE = getUploadApiBase(mode);
   const url = `${API_BASE}/api/offline/upload`;
 
   console.log("[UPLOAD] mode =", mode);
