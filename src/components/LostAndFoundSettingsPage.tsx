@@ -385,18 +385,26 @@ function RoiCanvas(props: RoiCanvasProps) {
     hintTitle,
     previewMaxWidth = 420,
   } = props;
-
+  const drawRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   const handleClick = (e: React.MouseEvent) => {
-    if (!wrapRef.current) return;
+    const el = drawRef.current;
+    if (!el) return;
 
-    const rect = wrapRef.current.getBoundingClientRect();
-    const x = clamp(e.clientX - rect.left, 0, rect.width);
-    const y = clamp(e.clientY - rect.top, 0, rect.height);
+    const rect = el.getBoundingClientRect();
 
-    const px = (x / rect.width) * canvasW;
-    const py = (y / rect.height) * canvasH;
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+
+    const x = clamp(localX, 0, rect.width);
+    const y = clamp(localY, 0, rect.height);
+
+    const scaleX = canvasW / rect.width;
+    const scaleY = canvasH / rect.height;
+
+    const px = x * scaleX;
+    const py = y * scaleY;
 
     onAddPoint({ x: px, y: py });
   };
@@ -456,12 +464,11 @@ function RoiCanvas(props: RoiCanvasProps) {
           <div className="p-3">
             <div className="w-full flex items-start justify-center">
               <div
-                ref={wrapRef}
+                ref={drawRef}
                 className="relative rounded-xl overflow-hidden bg-slate-900/60 select-none"
                 style={{
                   width: `min(100%, ${previewMaxWidth}px)`,
                   aspectRatio: `${canvasW} / ${canvasH}`,
-                  maxHeight: "calc(100vh - 280px)",
                 }}
                 onClick={handleClick}
                 title="Click to add points"
