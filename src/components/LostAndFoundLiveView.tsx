@@ -696,15 +696,6 @@ function CameraCard({
             </span>
           )}
         </div>
-
-        <div className="text-xs text-slate-400">
-          REC •{" "}
-          {new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          })}
-        </div>
       </div>
 
       <div className="p-3 space-y-3">
